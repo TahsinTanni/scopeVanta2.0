@@ -1,0 +1,602 @@
+// ScopeVanta — Prisma schema (Phase A: schema + auth wiring only, no feature logic)
+//
+// Tenant model: every workspace-owned table carries workspace_id as the sole
+// tenant key (never user id — see CLAUDE.md "Auth & workspace identity").
+// Workspace.id and User.id are Clerk's organization id / user id respectively,
+// so this schema has no separate identity-mapping table to maintain.
+//
+// created_by_user_id / *_by_user_id columns are attribution only — they never
+// gate access. Access is always workspace membership + role.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Identity & workspace
+// ---------------------------------------------------------------------------
+
+// Mirrors a Clerk user. Id is Clerk's user id — no local password/session data.
+model User {
+  id        String   @id
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  memberships            WorkspaceMember[]
+  settings               UserSettings[]
+  sentInvites            WorkspaceInvite[] @relation("InviteSender")
+  invitedMembers         WorkspaceMember[] @relation("MemberInviter")
+  createdClients         Client[]          @relation("ClientCreator")
+  createdProjects        Project[]         @relation("ProjectCreator")
+  createdVersions        ProposalVersion[] @relation("VersionCreator")
+  uploadedFiles          KnowledgeFile[]   @relation("FileUploader")
+  createdRates           Rate[]            @relation("RateCreator")
+  createdBaselines       ScopeBaseline[]   @relation("BaselineCreator")
+  createdChangeOrders    ChangeOrder[]     @relation("ChangeOrderCreator")
+  approvedChangeOrders   ChangeOrder[]     @relation("ChangeOrderApprover")
+  analyticsEvents        AnalyticsEvent[]
+  createdProposalShares  ProposalShare[]   @relation("ProposalShareCreator")
+  createdDiscoveryShares DiscoveryShare[]  @relation("DiscoveryShareCreator")
+  commercialAudits       CommercialAudit[]
+
+  @@map("users")
+}
+
+// Mirrors a Clerk organization. Id is Clerk's organization id.
+model Workspace {
+  id        String   @id
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members             WorkspaceMember[]
+  invites             WorkspaceInvite[]
+  companyProfile      CompanyProfile?
+  userSettings        UserSettings[]
+  clients             Client[]
+  projects            Project[]
+  knowledgeFiles      KnowledgeFile[]
+  knowledgeRecords    KnowledgeRecord[]
+  rates               Rate[]
+  scopeBaselines      ScopeBaseline[]
+  changeOrders        ChangeOrder[]
+  analyticsEvents     AnalyticsEvent[]
+  proposalShares      ProposalShare[]
+  discoveryShares     DiscoveryShare[]
+  billingSubscription BillingSubscription?
+  billingEvents       BillingEvent[]
+  commercialAudits    CommercialAudit[]
+  proposalVersions    ProposalVersion[]
+
+  @@map("workspaces")
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+
+  @@map("workspace_role")
+}
+
+// One workspace has exactly one OWNER at a time, enforced at the application
+// layer (transfer-ownership action), not by a DB constraint — Postgres has no
+// clean way to express "exactly one row per group has role=OWNER".
+model WorkspaceMember {
+  id              String        @id @default(cuid())
+  workspaceId     String        @map("workspace_id")
+  userId          String        @map("user_id")
+  role            WorkspaceRole
+  invitedByUserId String?       @map("invited_by_user_id")
+  joinedAt        DateTime      @default(now()) @map("joined_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invitedBy User?     @relation("MemberInviter", fields: [invitedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+
+  @@map("invite_status")
+}
+
+// Local mirror of a Clerk organization invitation (Clerk is the source of
+// truth and sends the email / handles signup-vs-signin resolution — see
+// CLAUDE.md). This table exists so the app can query pending invites and,
+// critically, hook billing-quantity sync (part c) off invite acceptance
+// without round-tripping Clerk on every read.
+model WorkspaceInvite {
+  id                String        @id @default(cuid())
+  workspaceId       String        @map("workspace_id")
+  clerkInvitationId String?       @unique @map("clerk_invitation_id")
+  email             String
+  role              WorkspaceRole
+  status            InviteStatus  @default(PENDING)
+  invitedByUserId   String        @map("invited_by_user_id")
+  expiresAt         DateTime      @map("expires_at")
+  acceptedAt        DateTime?     @map("accepted_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User      @relation("InviteSender", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, status])
+  @@index([email])
+  @@map("workspace_invites")
+}
+
+// ---------------------------------------------------------------------------
+// Profile split (replaces the docs' conflated "Profile/workspace")
+// ---------------------------------------------------------------------------
+
+// Workspace-level, shared. Owner/Admin write access only (enforced in route
+// handlers via the shared authorization check, not here).
+model CompanyProfile {
+  id               String   @id @default(cuid())
+  workspaceId      String   @unique @map("workspace_id")
+  // Fields below mirror the legacy per-user Profile 1:1 (legacy Profile.name
+  // /email/address/company/expertise/website/logoPath/onboarded) — now
+  // shared at the workspace level instead of duplicated per member, since
+  // this is the business identity every AI prompt (analyze, refine,
+  // commercial-lab, proposal-studio, win-plan, deal-os, close-coach,
+  // support) draws on.
+  contactName      String?  @map("contact_name")
+  contactEmail     String?  @map("contact_email")
+  address          String?
+  businessName     String?  @map("business_name")
+  expertise        String?  @db.Text
+  website          String?
+  industry         String?
+  logoPath         String?  @map("logo_path")
+  onboarded        Boolean  @default(false)
+  branding         Json?
+  proposalDefaults Json?    @map("proposal_defaults")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("company_profile")
+}
+
+// Per-membership, not globally per user — a person may belong to more than
+// one workspace and can have different preferences in each.
+model UserSettings {
+  id                      String   @id @default(cuid())
+  workspaceId             String   @map("workspace_id")
+  userId                  String   @map("user_id")
+  displayName             String?  @map("display_name")
+  notificationPreferences Json?    @map("notification_preferences")
+  uiPreferences           Json?    @map("ui_preferences")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@map("user_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Client / CRM
+// ---------------------------------------------------------------------------
+
+model Client {
+  id              String    @id @default(cuid())
+  workspaceId     String    @map("workspace_id")
+  createdByUserId String?   @map("created_by_user_id")
+  name            String
+  company         String?
+  email           String?
+  phone           String?
+  website         String?
+  industry        String?
+  lifecycleStatus String?   @map("lifecycle_status")
+  notes           String?   @db.Text
+  goals           String?   @db.Text
+  preferences     String?   @db.Text
+  decisionMakers  String?   @map("decision_makers") @db.Text
+  painPoints      String?   @map("pain_points") @db.Text
+  buyingCriteria  String?   @map("buying_criteria") @db.Text
+  knownObjections String?   @map("known_objections") @db.Text
+  nextStep        String?   @map("next_step")
+  followUpDate    DateTime? @map("follow_up_date")
+  logoUrl         String?   @map("logo_url")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("ClientCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  projects  Project[]
+
+  @@index([workspaceId])
+  @@map("clients")
+}
+
+// ---------------------------------------------------------------------------
+// Projects / proposals
+// ---------------------------------------------------------------------------
+
+model Project {
+  id                     String   @id @default(cuid())
+  workspaceId            String   @map("workspace_id")
+  clientId               String?  @map("client_id")
+  createdByUserId        String?  @map("created_by_user_id")
+  name                   String
+  clientLabel            String?  @map("client_label")
+  brief                  String?  @db.Text
+  status                 String?
+  dealStage              String   @default("Draft") @map("deal_stage")
+  dealValue              Decimal? @map("deal_value") @db.Decimal(12, 2)
+  riskScore              Float?   @map("risk_score")
+  summary                Json?
+  risks                  Json?
+  clarificationQuestions Json?    @map("clarification_questions")
+  proposal               Json?
+  evidence               Json?
+  groundingSummary       Json?    @map("grounding_summary")
+  visuals                Json?
+  proposalOptions        Json?    @map("proposal_options")
+  budget                 Json?
+  timeline               Json?
+  pipelineStage          String?  @map("pipeline_stage")
+  currentVersion         Int      @default(1) @map("current_version")
+  evidenceStatus         String   @default("ok") @map("evidence_status")
+  commercialStale        Boolean  @default(false) @map("commercial_stale")
+  shareToken             String?  @unique @map("share_token")
+  discoveryShareToken    String?  @unique @map("discovery_share_token")
+  // Catch-all for the AI-intelligence sub-objects the legacy system grows on
+  // a project over time (commercialLab, dealOS, proposalStudio, winPlan,
+  // closeCoach, commercialAutopilot, estimateLines/estimateSummary,
+  // dealScenarios, scopeGraph, clientDiscovery, outcomeLearning, etc). These
+  // are AI-shaped, evolving structures rather than queryable relational
+  // columns — see CLAUDE.md-adjacent note in the API route translation.
+  data                   Json?
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  client    Client?   @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  createdBy User?     @relation("ProjectCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  proposalVersions ProposalVersion[]
+  scopeBaselines   ScopeBaseline[]
+  changeOrders     ChangeOrder[]
+  proposalShares   ProposalShare[]
+  discoveryShares  DiscoveryShare[]
+  commercialAudits CommercialAudit[]
+
+  @@index([workspaceId])
+  @@index([clientId])
+  @@map("projects")
+}
+
+model ProposalVersion {
+  id              String   @id @default(cuid())
+  projectId       String   @map("project_id")
+  workspaceId     String   @map("workspace_id")
+  versionNumber   Int      @map("version_number")
+  snapshot        Json
+  reason          String
+  createdByUserId String?  @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("VersionCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, versionNumber])
+  @@index([workspaceId])
+  @@map("proposal_versions")
+}
+
+// ---------------------------------------------------------------------------
+// File intelligence / knowledge
+// ---------------------------------------------------------------------------
+
+// STORED = original saved but no extraction attempted/applicable yet;
+// READY = text extracted and structured; FAILED = extraction attempted and
+// failed (original still retained). Matches legacy's stored/ready/failed.
+enum KnowledgeFileStatus {
+  STORED
+  READY
+  FAILED
+
+  @@map("knowledge_file_status")
+}
+
+model KnowledgeFile {
+  id                 String              @id @default(cuid())
+  workspaceId        String              @map("workspace_id")
+  uploadedByUserId   String?             @map("uploaded_by_user_id")
+  fileName           String              @map("file_name")
+  storageKey         String              @map("storage_key")
+  mimeType           String              @map("mime_type")
+  sizeBytes          Int                 @map("size_bytes")
+  status             KnowledgeFileStatus @default(STORED)
+  extractedText      String?             @map("extracted_text") @db.Text
+  extractionMethod   String?             @map("extraction_method")
+  extractionError    String?             @map("extraction_error")
+  intelligence       Json?
+  intelligenceStatus String?             @map("intelligence_status")
+  intelligenceError  String?             @map("intelligence_error")
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
+
+  workspace  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  uploadedBy User?             @relation("FileUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  records    KnowledgeRecord[]
+
+  @@index([workspaceId])
+  @@map("knowledge_files")
+}
+
+model KnowledgeRecord {
+  id              String   @id @default(cuid())
+  workspaceId     String   @map("workspace_id")
+  knowledgeFileId String?  @map("knowledge_file_id")
+  category        String
+  content         Json
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  knowledgeFile KnowledgeFile? @relation(fields: [knowledgeFileId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([knowledgeFileId])
+  @@map("knowledge_records")
+}
+
+// ---------------------------------------------------------------------------
+// Commercial system
+// ---------------------------------------------------------------------------
+
+model Rate {
+  id              String   @id @default(cuid())
+  workspaceId     String   @map("workspace_id")
+  createdByUserId String?  @map("created_by_user_id")
+  role            String
+  costRate        Decimal  @map("cost_rate") @db.Decimal(10, 2)
+  sellRate        Decimal  @map("sell_rate") @db.Decimal(10, 2)
+  overheadPct     Decimal  @default(0) @map("overhead_pct") @db.Decimal(5, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("RateCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@map("rates")
+}
+
+model ScopeBaseline {
+  id              String   @id @default(cuid())
+  projectId       String   @map("project_id")
+  workspaceId     String   @map("workspace_id")
+  snapshot        Json
+  createdByUserId String?  @map("created_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace    Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy    User?         @relation("BaselineCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  changeOrders ChangeOrder[]
+
+  @@index([workspaceId])
+  @@index([projectId])
+  @@map("scope_baselines")
+}
+
+enum ChangeOrderStatus {
+  DRAFT
+  APPROVED
+
+  @@map("change_order_status")
+}
+
+model ChangeOrder {
+  id               String            @id @default(cuid())
+  projectId        String            @map("project_id")
+  workspaceId      String            @map("workspace_id")
+  scopeBaselineId  String?           @map("scope_baseline_id")
+  description      Json
+  status           ChangeOrderStatus @default(DRAFT)
+  createdByUserId  String?           @map("created_by_user_id")
+  approvedByUserId String?           @map("approved_by_user_id")
+  approvedAt       DateTime?         @map("approved_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  project       Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace     Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  scopeBaseline ScopeBaseline? @relation(fields: [scopeBaselineId], references: [id], onDelete: SetNull)
+  createdBy     User?          @relation("ChangeOrderCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedBy    User?          @relation("ChangeOrderApprover", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([projectId])
+  @@map("change_orders")
+}
+
+// ---------------------------------------------------------------------------
+// Analytics
+// ---------------------------------------------------------------------------
+
+model AnalyticsEvent {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  userId      String?  @map("user_id")
+  eventName   String   @map("event_name")
+  context     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, eventName])
+  @@map("analytics_events")
+}
+
+// ---------------------------------------------------------------------------
+// Sharing
+// ---------------------------------------------------------------------------
+
+// Legacy lifecycle values preserved verbatim rather than forced into an
+// enum: proposal shares use shared|accepted|changes_requested|revoked,
+// discovery shares use open|submitted|revoked.
+model ProposalShare {
+  id              String    @id @default(cuid())
+  projectId       String    @map("project_id")
+  workspaceId     String    @map("workspace_id")
+  token           String    @unique
+  status          String    @default("shared")
+  // Buyer-facing snapshot + engagement: proposal text/version snapshot at
+  // share time, scenarios, selectedScenario, decision/decisionName/
+  // decisionEmail/decisionNote, views, lastViewedAt, engagement log, etc.
+  data            Json?
+  createdByUserId String?   @map("created_by_user_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  revokedAt       DateTime? @map("revoked_at")
+
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User?     @relation("ProposalShareCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@map("proposal_shares")
+}
+
+model DiscoveryShare {
+  id              String    @id @default(cuid())
+  workspaceId     String    @map("workspace_id")
+  projectId       String?   @map("project_id")
+  token           String    @unique
+  status          String    @default("open")
+  // Discovery questions sent + buyer's submitted name/email/answers.
+  data            Json?
+  createdByUserId String?   @map("created_by_user_id")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  revokedAt       DateTime? @map("revoked_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdBy User?     @relation("DiscoveryShareCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@map("discovery_shares")
+}
+
+// ---------------------------------------------------------------------------
+// Billing (Square) — see CLAUDE.md "Billing (Square)"
+// ---------------------------------------------------------------------------
+
+// Values match the legacy plan strings exactly (Freelancer/Pro/Agency),
+// since they're used as display labels and as PLAN_LIMITS/PLAN_PRICES_CENTS
+// lookup keys throughout the billing code.
+enum BillingPlan {
+  Freelancer
+  Pro
+  Agency
+
+  @@map("billing_plan")
+}
+
+// One row per workspace: current subscription state. square_customer_id
+// lives here — scoped to the workspace via workspace_id, never to a user
+// (see CLAUDE.md "Billing (Square)"). `status` is a plain string, not an
+// enum: the legacy lifecycle uses dynamic values (trial_setup,
+// awaiting_square_confirmation, verified_active, payment_failed,
+// square_<lowercased Square status>, owner_test) that don't map onto a
+// fixed set worth hard-coding into the schema.
+model BillingSubscription {
+  id                   String      @id @default(cuid())
+  workspaceId          String      @unique @map("workspace_id")
+  squareCustomerId     String?     @unique @map("square_customer_id")
+  squareSubscriptionId String?     @unique @map("square_subscription_id")
+  plan                 BillingPlan @default(Freelancer)
+  status               String      @default("trial_setup")
+  quantity             Int         @default(1)
+  checkoutStartedAt    DateTime?   @map("checkout_started_at")
+  trialStartedAt       DateTime?   @map("trial_started_at")
+  trialEndsAt          DateTime?   @map("trial_ends_at")
+  verifiedAt           DateTime?   @map("verified_at")
+  chargedThroughDate   DateTime?   @map("charged_through_date")
+  billingAction        String?     @map("billing_action")
+  lastBillingEvent     String?     @map("last_billing_event")
+  createdAt            DateTime    @default(now()) @map("created_at")
+  updatedAt            DateTime    @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("billing_subscriptions")
+}
+
+// Single global row (not workspace-scoped): the Square catalog subscription
+// plan + per-plan variation IDs, created lazily on first Square API call and
+// shared by every workspace — matches the legacy `billing-config` table,
+// which was likewise a single un-namespaced record.
+model SquareBillingConfig {
+  id         String   @id @default(cuid())
+  locationId String   @map("location_id")
+  planId     String   @map("plan_id")
+  variations Json
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("square_billing_config")
+}
+
+// Append-only log of processed Square webhook events, keyed by Square's own
+// event id for idempotent dedupe.
+model BillingEvent {
+  id            String    @id @default(cuid())
+  workspaceId   String?   @map("workspace_id")
+  squareEventId String    @unique @map("square_event_id")
+  eventType     String    @map("event_type")
+  payload       Json
+  occurredAt    DateTime? @map("occurred_at")
+  processedAt   DateTime  @default(now()) @map("processed_at")
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@map("billing_events")
+}
+
+// ---------------------------------------------------------------------------
+// Commercial audit trail
+// ---------------------------------------------------------------------------
+
+model CommercialAudit {
+  id                String   @id @default(cuid())
+  workspaceId       String   @map("workspace_id")
+  projectId         String?  @map("project_id")
+  action            String
+  payload           Json?
+  performedByUserId String?  @map("performed_by_user_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  performedBy User?     @relation(fields: [performedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([projectId])
+  @@map("commercial_audit")
+}

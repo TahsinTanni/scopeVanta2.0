@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+/* Dark neutral/monochrome, minimal design system — always-on dark theme
+   (not prefers-color-scheme driven; this app has one look). */
+:root {
+  --background: #0a0a0b;
+  --surface: #111113;
+  --surface-raised: #17171a;
+  --border: #26262b;
+  --border-subtle: #1c1c20;
+  --foreground: #f4f4f5;
+  --foreground-muted: #a1a1aa;
+  --foreground-subtle: #6b6b74;
+  --accent: #e4e4e7;
+  --accent-foreground: #0a0a0b;
+  --danger: #f87171;
+  --warning: #fbbf24;
+  --success: #4ade80;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-foreground: var(--foreground);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-foreground-subtle: var(--foreground-subtle);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-danger: var(--danger);
+  --color-warning: var(--warning);
+  --color-success: var(--success);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
