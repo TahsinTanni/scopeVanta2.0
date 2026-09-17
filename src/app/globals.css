@@ -93,6 +93,10 @@
 
 html {
   color-scheme: dark;
+  /* Slight global scale-up — every rem-based text/spacing size in the app
+     (Tailwind's entire scale is rem-based) grows proportionally from this
+     one line, instead of editing each page's classNames individually. */
+  font-size: 17px;
 }
 
 body {

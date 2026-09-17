@@ -92,7 +92,7 @@ export default function BillingPage() {
 
       <BentoCardGrid gridRef={gridRef} className="space-y-6">
         {/* Status card */}
-        <BentoCard className="max-w-3xl p-6" glowColor="78, 135, 112">
+        <BentoCard className="max-w-5xl p-6" glowColor="78, 135, 112">
           <div className="flex items-center justify-between border-b border-border-hairline pb-4">
             <div>
               <p className="text-xs text-ink-muted uppercase tracking-wider font-mono">Current Workspace Plan</p>

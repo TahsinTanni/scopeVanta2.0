@@ -295,7 +295,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   const parsedSections = parseProposalSections(proposalDraft);
 
   return (
-    <div className="max-w-4xl space-y-6 print:max-w-none print:space-y-4">
+    <div className="max-w-6xl space-y-6 print:max-w-none print:space-y-4">
       {/* Top action & status bar */}
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border-hairline pb-5 no-print">
         <div>

@@ -221,6 +221,12 @@ export const MoltenMetal: React.FC<MoltenMetalProps> = ({
     }
 
     if (!renderer?.gl) return;
+    // OGL's Renderer creates/reuses the WebGL context on `canvas` itself —
+    // per spec a canvas can only ever have one rendering context, so this
+    // is the same underlying object as the preflight `gl` above, just with
+    // OGL's `.renderer`/`.canvas` properties attached. Use `renderer.gl`
+    // explicitly from here on rather than relying on that being true.
+    const rendererGl = renderer.gl;
 
     canvas.style.width = '100%';
     canvas.style.height = '100%';
@@ -228,8 +234,8 @@ export const MoltenMetal: React.FC<MoltenMetalProps> = ({
     canvas.style.pointerEvents = 'none';
     container.appendChild(canvas);
 
-    const geometry = new Triangle(gl);
-    const program = new Program(gl, {
+    const geometry = new Triangle(rendererGl);
+    const program = new Program(rendererGl, {
       vertex,
       fragment,
       uniforms: {
@@ -259,7 +265,7 @@ export const MoltenMetal: React.FC<MoltenMetalProps> = ({
       }
     });
 
-    const mesh = new Mesh(gl, { geometry, program });
+    const mesh = new Mesh(rendererGl, { geometry, program });
     ctxMap.set(container, { renderer, program, mesh });
 
     const setSize = () => {
@@ -268,8 +274,8 @@ export const MoltenMetal: React.FC<MoltenMetalProps> = ({
       const h = Math.max(1, Math.floor(rect.height));
       renderer?.setSize(w, h);
       const res = program.uniforms.iResolution.value as Float32Array;
-      res[0] = gl.drawingBufferWidth;
-      res[1] = gl.drawingBufferHeight;
+      res[0] = rendererGl.drawingBufferWidth;
+      res[1] = rendererGl.drawingBufferHeight;
       renderer?.render({ scene: mesh });
     };
 
@@ -342,7 +348,7 @@ export const MoltenMetal: React.FC<MoltenMetalProps> = ({
       window.removeEventListener('mousemove', handleMouseMove);
       ctxMap.delete(container);
       if (canvas.parentNode === container) container.removeChild(canvas);
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
+      rendererGl.getExtension('WEBGL_lose_context')?.loseContext();
     };
   }, []);
 

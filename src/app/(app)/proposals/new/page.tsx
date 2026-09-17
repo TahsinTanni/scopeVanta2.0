@@ -44,7 +44,7 @@ export default function NewProposalPage() {
   return (
     <div className="space-y-6">
       <PageHeader title="New Proposal" description="Analyze → Clarify → Scope → Price → Propose" />
-      <Card className="max-w-2xl border-border-hairline bg-surface-1 p-6">
+      <Card className="max-w-4xl border-border-hairline bg-surface-1 p-6">
         <div className="space-y-4">
           <div>
             <Label>Saved client (optional)</Label>
