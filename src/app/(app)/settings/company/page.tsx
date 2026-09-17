@@ -3,8 +3,6 @@
 import { useEffect, useState } from "react";
 import { Card, PageHeader, Button, Input, Textarea, Label } from "@/components/ui";
 
-// Replaces legacy App.tsx's company profile view (lines 6247-6358) — now
-// workspace-level per CLAUDE.md's profile split.
 export default function CompanyProfilePage() {
   const [form, setForm] = useState({ contactName: "", contactEmail: "", address: "", businessName: "", website: "", expertise: "" });
   const [saved, setSaved] = useState(false);
@@ -30,9 +28,12 @@ export default function CompanyProfilePage() {
   }
 
   return (
-    <div>
-      <PageHeader title="Company Profile" description="Shared workspace-level business identity every proposal draws on." />
-      <Card className="max-w-2xl">
+    <div className="space-y-6">
+      <PageHeader
+        title="Company Profile"
+        description="Shared workspace-level business identity every proposal draws on."
+      />
+      <Card className="max-w-2xl border-border-hairline bg-surface-1 p-6">
         <div className="grid grid-cols-2 gap-4">
           <div><Label>Full name</Label><Input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} /></div>
           <div><Label>Email</Label><Input type="email" value={form.contactEmail} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} /></div>
@@ -41,9 +42,20 @@ export default function CompanyProfilePage() {
           <div><Label>Website</Label><Input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} /></div>
           <div className="col-span-2"><Label>Expertise & services</Label><Textarea rows={4} value={form.expertise} onChange={(e) => setForm({ ...form, expertise: e.target.value })} /></div>
         </div>
-        {error && <p className="mt-3 text-sm text-danger">{error}</p>}
-        {saved && <p className="mt-3 text-sm text-success">Saved.</p>}
-        <Button className="mt-4" onClick={save}>Save</Button>
+        {error && (
+          <div className="mt-4 rounded-[4px] border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-xs text-status-danger font-mono">
+            {error}
+          </div>
+        )}
+        {saved && (
+          <div className="mt-4 rounded-[4px] border border-status-success/30 bg-status-success/10 px-3 py-2 text-xs text-status-success font-mono">
+            Profile saved successfully.
+          </div>
+        )}
+        <Button className="mt-6 flex items-center gap-1.5" onClick={save}>
+          <span className="material-symbols-outlined text-[18px]">check</span>
+          Save Profile
+        </Button>
       </Card>
     </div>
   );

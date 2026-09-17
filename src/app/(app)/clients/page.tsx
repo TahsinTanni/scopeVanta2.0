@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Card, PageHeader, Button, Input, Textarea, Select, Label, Badge, EmptyState } from "@/components/ui";
 
-// Replaces legacy App.tsx's clients view (lines 5420-5923).
 type Client = {
   id: string; name: string; company?: string | null; email?: string | null; phone?: string | null; website?: string | null;
   industry?: string | null; lifecycleStatus?: string | null; notes?: string | null; goals?: string | null; nextStep?: string | null;
@@ -53,16 +52,45 @@ export default function ClientsPage() {
   const filtered = clients.filter((c) => !search || c.name.toLowerCase().includes(search.toLowerCase()) || (c.company || "").toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div>
-      <PageHeader title="Clients" description="Client 360" actions={<Button onClick={() => { setDraft({ ...EMPTY }); setEditingId(null); }}>New client</Button>} />
+    <div className="space-y-6">
+      <PageHeader
+        title="Clients"
+        description="Buyer directory, relationship stages, and risk profiles."
+        actions={
+          <Button
+            onClick={() => { setDraft({ ...EMPTY }); setEditingId(null); }}
+            className="flex items-center gap-1.5"
+          >
+            <span className="material-symbols-outlined text-[18px]">person_add</span>
+            New Client
+          </Button>
+        }
+      />
 
-      <Input placeholder="Search clients…" value={search} onChange={(e) => setSearch(e.target.value)} className="mb-4 max-w-sm" />
-      {error && <p className="mb-3 text-sm text-danger">{error}</p>}
+      <div className="relative max-w-sm">
+        <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted text-[18px]">
+          search
+        </span>
+        <Input
+          placeholder="Search clients…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+        />
+      </div>
+
+      {error && (
+        <div className="rounded-[4px] border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-xs text-status-danger font-mono">
+          {error}
+        </div>
+      )}
 
       {draft && (
-        <Card className="mb-6">
-          <h2 className="mb-3 text-sm font-semibold text-foreground">{editingId ? "Edit client" : "New client"}</h2>
-          <div className="grid grid-cols-2 gap-3">
+        <Card className="border-border-hairline bg-surface-1 p-6">
+          <h2 className="mb-4 text-base font-semibold text-ink-primary">
+            {editingId ? "Edit Client" : "New Client"}
+          </h2>
+          <div className="grid grid-cols-2 gap-4">
             <div><Label>Name</Label><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
             <div><Label>Company</Label><Input value={draft.company} onChange={(e) => setDraft({ ...draft, company: e.target.value })} /></div>
             <div><Label>Email</Label><Input type="email" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} /></div>
@@ -79,8 +107,8 @@ export default function ClientsPage() {
             <div className="col-span-2"><Label>Goals</Label><Textarea rows={2} value={draft.goals} onChange={(e) => setDraft({ ...draft, goals: e.target.value })} /></div>
             <div className="col-span-2"><Label>Notes</Label><Textarea rows={2} value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></div>
           </div>
-          <div className="mt-4 flex gap-2">
-            <Button onClick={save}>Save</Button>
+          <div className="mt-5 flex gap-2">
+            <Button onClick={save}>Save Client</Button>
             <Button variant="ghost" onClick={() => { setDraft(null); setEditingId(null); }}>Cancel</Button>
           </div>
         </Card>
@@ -89,23 +117,37 @@ export default function ClientsPage() {
       {!filtered.length ? (
         <EmptyState title="No clients yet" description="Add a client to start connecting proposals to buyer context." />
       ) : (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filtered.map((c) => (
-            <Card key={c.id}>
+            <Card key={c.id} className="border-border-hairline bg-surface-1 hover:bg-surface-2 transition-colors p-5">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="font-medium text-foreground">{c.name}</p>
-                  <p className="text-sm text-foreground-subtle">{c.company}</p>
+                  <p className="font-semibold text-ink-primary text-base">{c.name}</p>
+                  <p className="text-xs text-ink-muted mt-0.5">{c.company || "Independent Buyer"}</p>
                 </div>
-                <Badge>{c.lifecycleStatus || "Prospect"}</Badge>
+                <Badge tone={c.lifecycleStatus === "Won" || c.lifecycleStatus === "Active" ? "success" : "neutral"}>
+                  {c.lifecycleStatus || "Prospect"}
+                </Badge>
               </div>
-              <div className="mt-3 flex gap-4 text-xs text-foreground-subtle">
-                <span>{c.proposalCount ?? 0} proposals</span>
-                {c.averageRisk != null && <span>Avg risk {c.averageRisk}</span>}
+              <div className="mt-4 flex gap-4 text-xs text-ink-muted font-mono tabular-nums border-t border-border-hairline/60 pt-3">
+                <span className="flex items-center gap-1">
+                  <span className="material-symbols-outlined text-[14px]">description</span>
+                  {c.proposalCount ?? 0} proposals
+                </span>
+                {c.averageRisk != null && (
+                  <span className="flex items-center gap-1">
+                    <span className="material-symbols-outlined text-[14px]">shield</span>
+                    Avg risk {c.averageRisk}
+                  </span>
+                )}
               </div>
-              <div className="mt-3 flex gap-2">
-                <Button variant="secondary" onClick={() => { setEditingId(c.id); setDraft({ ...EMPTY, ...c, status: c.lifecycleStatus || "Prospect" } as typeof EMPTY); }}>Edit</Button>
-                <Button variant="danger" onClick={() => remove(c.id)}>Delete</Button>
+              <div className="mt-4 flex gap-2 border-t border-border-hairline/40 pt-3">
+                <Button variant="secondary" className="text-xs py-1.5 px-3" onClick={() => { setEditingId(c.id); setDraft({ ...EMPTY, ...c, status: c.lifecycleStatus || "Prospect" } as typeof EMPTY); }}>
+                  Edit
+                </Button>
+                <Button variant="danger" className="text-xs py-1.5 px-3" onClick={() => remove(c.id)}>
+                  Delete
+                </Button>
               </div>
             </Card>
           ))}

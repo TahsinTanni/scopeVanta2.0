@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Card, PageHeader, Button, Badge, EmptyState } from "@/components/ui";
 
-// Replaces legacy App.tsx's knowledge view (lines 5923-6247).
 type FileItem = { id: string; name: string; status: string; extractedChars: number; error?: string; documentType?: string; summary?: string };
 type KnowledgeRecord = { id: string; category: string; content: { fact: string; sourceFileName: string }; isActive: boolean };
 type Health = { healthy: boolean; files: number; facts: number; activeFacts: number; recommendation: string };
@@ -58,69 +57,103 @@ export default function KnowledgePage() {
   }
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
-        title="Knowledge"
-        description="Knowledge Base"
+        title="Knowledge Base"
+        description="Firm capabilities, case studies, and commercial rules."
         actions={
-          <label className="cursor-pointer rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-foreground hover:opacity-90">
-            {uploading ? "Uploading…" : "Upload file"}
-            <input type="file" className="hidden" accept=".pdf,.txt,.md,.doc,.docx,image/*" onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])} />
+          <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
+            <span className="material-symbols-outlined text-[18px]">
+              {uploading ? "progress_activity" : "upload_file"}
+            </span>
+            <span>{uploading ? "Uploading…" : "Upload Document"}</span>
+            <input
+              type="file"
+              className="hidden"
+              accept=".pdf,.txt,.md,.doc,.docx,image/*"
+              onChange={(e) => e.target.files?.[0] && onUpload(e.target.files[0])}
+            />
           </label>
         }
       />
-      {error && <p className="mb-3 text-sm text-danger">{error}</p>}
+      {error && (
+        <div className="rounded-[4px] border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-xs text-status-danger font-mono">
+          {error}
+        </div>
+      )}
 
       {health && (
-        <Card className="mb-6">
+        <Card className="border-border-hairline bg-surface-1 p-5">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-semibold text-foreground">Knowledge health</p>
-              <p className="mt-1 text-xs text-foreground-subtle">{health.recommendation}</p>
+              <p className="text-sm font-semibold text-ink-primary">Knowledge Health</p>
+              <p className="mt-1 text-xs text-ink-muted">{health.recommendation}</p>
             </div>
-            <Badge tone={health.healthy ? "success" : "warning"}>{health.healthy ? "Healthy" : "Needs review"}</Badge>
+            <Badge tone={health.healthy ? "success" : "warning"}>
+              {health.healthy ? "Optimal" : "Needs review"}
+            </Badge>
           </div>
-          <div className="mt-3 flex gap-6 text-xs text-foreground-subtle">
-            <span>{health.files} files</span>
-            <span>{health.activeFacts}/{health.facts} active facts</span>
+          <div className="mt-4 flex gap-6 text-xs text-ink-muted font-mono tabular-nums border-t border-border-hairline/60 pt-3">
+            <span>{health.files} files indexed</span>
+            <span>
+              {health.activeFacts} / {health.facts} active facts
+            </span>
           </div>
         </Card>
       )}
 
-      <h2 className="mb-3 text-sm font-semibold text-foreground">Files</h2>
-      {!files.length ? (
-        <EmptyState title="No knowledge files yet" description="Upload a capability deck, service sheet, or reference document." />
-      ) : (
-        <div className="mb-8 space-y-2">
-          {files.map((f) => (
-            <Card key={f.id} className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-foreground">{f.name}</p>
-                <p className="text-xs text-foreground-subtle">{f.documentType || f.status} · {f.extractedChars} chars{f.error ? ` · ${f.error}` : ""}</p>
+      <div>
+        <h2 className="mb-3 text-sm font-semibold text-ink-primary">Indexed Documents</h2>
+        {!files.length ? (
+          <EmptyState title="No knowledge files yet" description="Upload a capability deck, service sheet, or reference document." />
+        ) : (
+          <div className="space-y-2">
+            {files.map((f) => (
+              <Card key={f.id} className="flex items-center justify-between border-border-hairline bg-surface-1 p-4">
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium text-ink-primary">{f.name}</p>
+                  <p className="text-xs text-ink-muted font-mono tabular-nums">
+                    {f.documentType || f.status} · {f.extractedChars} chars{f.error ? ` · ${f.error}` : ""}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge tone={f.status === "ready" ? "success" : f.status === "failed" ? "danger" : "neutral"}>
+                    {f.status}
+                  </Badge>
+                  <Button variant="secondary" className="text-xs py-1 px-2.5" onClick={() => reprocess(f.id)}>
+                    Reprocess
+                  </Button>
+                  <Button variant="danger" className="text-xs py-1 px-2.5" onClick={() => remove(f.id)}>
+                    Delete
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-sm font-semibold text-ink-primary">Extracted Commercial Facts ({records.length})</h2>
+        <div className="space-y-2">
+          {records.map((r) => (
+            <div
+              key={r.id}
+              className="flex items-center justify-between rounded-[4px] border border-border-hairline bg-surface-1 px-3.5 py-2.5 text-sm hover:bg-surface-2 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <Badge tone="neutral">{r.category}</Badge>
+                <span className="text-xs text-ink-secondary">{r.content.fact}</span>
               </div>
-              <div className="flex gap-2">
-                <Badge tone={f.status === "ready" ? "success" : f.status === "failed" ? "danger" : "neutral"}>{f.status}</Badge>
-                <Button variant="secondary" onClick={() => reprocess(f.id)}>Reprocess</Button>
-                <Button variant="danger" onClick={() => remove(f.id)}>Delete</Button>
-              </div>
-            </Card>
+              <button
+                onClick={() => toggleActive(r.id, !r.isActive)}
+                className="text-xs font-mono text-ink-muted hover:text-ink-primary transition-colors ml-4 shrink-0"
+              >
+                {r.isActive ? "Pause" : "Activate"}
+              </button>
+            </div>
           ))}
         </div>
-      )}
-
-      <h2 className="mb-3 text-sm font-semibold text-foreground">Facts ({records.length})</h2>
-      <div className="space-y-2">
-        {records.map((r) => (
-          <div key={r.id} className="flex items-center justify-between rounded-lg border border-border-subtle px-3 py-2 text-sm">
-            <div>
-              <Badge>{r.category}</Badge>
-              <span className="ml-2 text-foreground-muted">{r.content.fact}</span>
-            </div>
-            <button onClick={() => toggleActive(r.id, !r.isActive)} className="text-xs text-foreground-subtle hover:text-foreground">
-              {r.isActive ? "Pause" : "Activate"}
-            </button>
-          </div>
-        ))}
       </div>
     </div>
   );

@@ -1,39 +1,94 @@
 @import "tailwindcss";
 
-/* Dark neutral/monochrome, minimal design system — always-on dark theme
-   (not prefers-color-scheme driven; this app has one look). */
-:root {
-  --background: #0a0a0b;
-  --surface: #111113;
-  --surface-raised: #17171a;
-  --border: #26262b;
-  --border-subtle: #1c1c20;
-  --foreground: #f4f4f5;
-  --foreground-muted: #a1a1aa;
-  --foreground-subtle: #6b6b74;
-  --accent: #e4e4e7;
-  --accent-foreground: #0a0a0b;
-  --danger: #f87171;
-  --warning: #fbbf24;
-  --success: #4ade80;
+/* ==========================================================================
+   Design tokens — "Forest Slate & Pale Linen" (Dark Native)
+   ========================================================================== */
+:root, .dark {
+  /* Surfaces */
+  --surface-0: #0E1312;   /* canvas / page background */
+  --surface-1: #111715;   /* nav rails, recessed wells */
+  --surface-2: #151D1A;   /* cards, panels (default) */
+  --surface-3: #1B2421;   /* hover states, popovers, tooltips */
+  --surface-4: #1E2825;   /* modals, drawers */
+
+  /* Borders */
+  --border-hairline: #25332E;   /* universal 1px border */
+  --border-subtle: #18231F;     /* internal cell/table row dividers */
+  --border-focus: #4E8770;      /* focus ring / active border */
+
+  /* Text */
+  --text-primary: #E4EAE6;
+  --text-secondary: #D5DDD8;
+  --text-muted: #8A9E96;
+  --text-disabled: #43554F;
+
+  /* Accent (primary brand color = forest sage green) */
+  --accent: #4E8770;          /* buttons, active states, key metrics */
+  --accent-hover: #5FA489;    /* hover */
+  --accent-pressed: #3D6E5B;  /* active/pressed, tinted badge bg at 15-20% opacity */
+  --accent-rgb: 78, 135, 112; /* for rgba()/glow props that need raw channels */
+
+  /* Semantic */
+  --danger: #A45454;
+  --warning: #A89158;
+  --info: #6D847B;
+
+  /* Backward-compatible aliasing */
+  --background: var(--surface-0);
+  --surface: var(--surface-2);
+  --surface-raised: var(--surface-1);
+  --border: var(--border-hairline);
+  --foreground: var(--text-primary);
+  --foreground-muted: var(--text-muted);
+  --foreground-subtle: var(--text-disabled);
+  --accent-foreground: #002116;
+  --success: #4E8770;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-surface: var(--surface);
-  --color-surface-raised: var(--surface-raised);
-  --color-border: var(--border);
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-surface-4: var(--surface-4);
+
+  --color-border-hairline: var(--border-hairline);
   --color-border-subtle: var(--border-subtle);
-  --color-foreground: var(--foreground);
-  --color-foreground-muted: var(--foreground-muted);
-  --color-foreground-subtle: var(--foreground-subtle);
+  --color-border-focus: var(--border-focus);
+
+  --color-ink-primary: var(--text-primary);
+  --color-ink-secondary: var(--text-secondary);
+  --color-ink-muted: var(--text-muted);
+  --color-ink-disabled: var(--text-disabled);
+
   --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-pressed: var(--accent-pressed);
+
   --color-danger: var(--danger);
   --color-warning: var(--warning);
-  --color-success: var(--success);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-info: var(--info);
+
+  /* Legacy utility mapping to ensure 100% stability */
+  --color-background: var(--surface-0);
+  --color-surface: var(--surface-2);
+  --color-surface-raised: var(--surface-1);
+  --color-border: var(--border-hairline);
+  --color-foreground: var(--text-primary);
+  --color-foreground-muted: var(--text-muted);
+  --color-foreground-subtle: var(--text-disabled);
+  --color-accent-foreground: #002116;
+  --color-success: #4E8770;
+
+  --font-display: var(--font-newsreader), Newsreader, Georgia, serif;
+  --font-body: var(--font-manrope), Manrope, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "JetBrains Mono", monospace;
+  --font-sans: var(--font-manrope), Manrope, sans-serif;
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
 }
 
 html {
@@ -41,8 +96,41 @@ html {
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-manrope), Manrope, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-newsreader), Newsreader, Georgia, serif !important;
+}
+
+.font-body {
+  font-family: var(--font-manrope), Manrope, sans-serif !important;
+}
+
+/* Tabular figures for all monospace numbers */
+.font-mono, [data-mono], code, pre {
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-jetbrains-mono), "JetBrains Mono", monospace !important;
+}
+
+/* Material symbols outlined styling */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: 300;
+  font-style: normal;
+  font-size: 20px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
 }
 
 @media print {
