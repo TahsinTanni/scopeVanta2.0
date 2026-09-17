@@ -215,8 +215,9 @@ export const POST = withErrors(async (req: Request) => {
     });
 
     return json({ ...project, projectId: project.id, usage: { used: used + 1, limit: max } });
-  } catch (e) {
+  } catch (e: any) {
     console.error("ScopeVanta analysis failed", e);
-    return error("Analysis service temporarily unavailable.", 502);
+    const detail = e?.message || e?.error?.message || String(e);
+    return error(`Analysis service temporarily unavailable: ${detail}`, 502);
   }
 });

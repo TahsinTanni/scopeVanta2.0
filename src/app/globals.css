@@ -44,3 +44,44 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+@media print {
+  @page {
+    margin: 15mm 20mm;
+    size: A4 portrait;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #111827 !important;
+  }
+
+  /* Hide entire page structure */
+  body * {
+    visibility: hidden !important;
+  }
+
+  /* Exclusively display the formal proposal document */
+  #printable-proposal-doc,
+  #printable-proposal-doc * {
+    visibility: visible !important;
+  }
+
+  #printable-proposal-doc {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #111827 !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}

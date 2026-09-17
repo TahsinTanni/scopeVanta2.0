@@ -10,8 +10,22 @@ import Anthropic from "@anthropic-ai/sdk";
 // equivalent here and is intentionally dropped rather than mapped onto
 // Anthropic's `thinking` (extended thinking) parameter, which is for a
 // different, heavier use case.
+//
+// `temperature` is accepted on every call site (~15 routes pass legacy's
+// 0/0.12/0.15/0.2/0.25 values) but deliberately NOT forwarded to the API:
+// this model rejects the parameter outright (400 invalid_request_error,
+// "temperature is deprecated for this model") rather than clamping or
+// ignoring it, confirmed by direct reproduction. Keeping the parameter in
+// the function signature avoids touching every call site for a value that
+// has no effect either way.
+//
+// System prompts are sent with `cache_control: ephemeral` — every route's
+// system text is a large, fixed string (unlike the per-request prompt),
+// so repeat calls to the same route within Anthropic's ~5 min cache TTL
+// reuse it at roughly 1/10th the input-token cost instead of re-billing
+// the full system prompt every time. This matters on metered API spend.
 
-const MODEL = "claude-sonnet-5";
+const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 
 let client: Anthropic | null = null;
 function anthropic() {
@@ -76,10 +90,10 @@ export async function aiGenerate(args: GenerateArgs): Promise<{ text: string }> 
       : [{ role: "user", content: userBlocks }];
     const response = await anthropic().messages.create({
       model: MODEL,
-      system: args.system,
+      system: [{ type: "text", text: args.system, cache_control: { type: "ephemeral" } }],
       messages,
-      max_tokens: args.maxTokens,
-      temperature: args.temperature,
+      max_tokens: Math.max(args.maxTokens || 4096, 16000),
+      thinking: { type: "disabled" },
     });
     const text = response.content
       .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
@@ -109,10 +123,10 @@ export async function aiExtract<T>(args: ExtractArgs): Promise<{ data: T }> {
   return withRetries(async () => {
     const response = await anthropic().messages.create({
       model: MODEL,
-      system: args.system,
+      system: [{ type: "text", text: args.system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: `${args.prompt}\n\nDOCUMENT:\n${args.content}` }],
-      max_tokens: args.maxTokens,
-      temperature: args.temperature,
+      max_tokens: Math.max(args.maxTokens || 4096, 16000),
+      thinking: { type: "disabled" },
       tools: [
         {
           name: "extract",
@@ -156,8 +170,16 @@ export async function aiScrape(args: { url: string }): Promise<{ status: number;
 
 /** Strips the ```json fences legacy prompts sometimes elicit, before JSON.parse — mirrors the inline `.replace(...)` every legacy route does. */
 export function stripJsonFence(text: string): string {
-  return text
-    .replace(/^```json\s*/i, "")
-    .replace(/```\s*$/i, "")
-    .trim();
+  let cleaned = text.trim();
+  if (cleaned.startsWith("```json")) {
+    cleaned = cleaned.replace(/^```json\s*/i, "").replace(/```\s*$/i, "").trim();
+  } else if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```\s*/i, "").replace(/```\s*$/i, "").trim();
+  }
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
+    return cleaned.slice(firstBrace, lastBrace + 1);
+  }
+  return cleaned;
 }

@@ -28,7 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen">
-      <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-surface">
+      <aside className="no-print flex w-64 shrink-0 flex-col border-r border-border bg-surface">
         <div className="flex items-center gap-2 border-b border-border px-5 py-4">
           <span className="text-sm font-semibold tracking-tight text-foreground">ScopeVanta</span>
         </div>
