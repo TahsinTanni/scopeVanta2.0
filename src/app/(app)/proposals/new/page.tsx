@@ -3,8 +3,18 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, PageHeader, Button, Input, Textarea, Label, Select } from "@/components/ui";
+import { trackEvent } from "@/lib/track";
 
 type ClientOption = { id: string; name: string };
+
+// Copied verbatim from src/app/api/analyze/route.ts's ALLOWED_SECTIONS —
+// keep in sync with that list, don't retype/reorder from memory.
+const ALLOWED_SECTIONS = [
+  "Executive Summary", "Client Challenge & Desired Outcome", "Our Understanding", "Strategic Approach",
+  "Detailed Scope of Work", "Deliverables & Acceptance Criteria", "Project Phases", "Timeline & Milestones",
+  "Client Inputs & Responsibilities", "Team & Delivery Approach", "Revision & Feedback Process", "Quality Assurance",
+  "Success Measures", "Investment & Payment", "Assumptions", "Exclusions", "Change Control", "Why Us", "Next Steps & Acceptance",
+];
 
 export default function NewProposalPage() {
   const router = useRouter();
@@ -16,6 +26,12 @@ export default function NewProposalPage() {
   const [timeline, setTimeline] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [mode, setMode] = useState<"Concise" | "Detailed" | "Premium">("Detailed");
+  const [selectedSections, setSelectedSections] = useState<string[]>([...ALLOWED_SECTIONS]);
+  const [includeVisuals, setIncludeVisuals] = useState(false);
+  const [includeSellerLogo, setIncludeSellerLogo] = useState(false);
+  const [referenceFile, setReferenceFile] = useState<File | null>(null);
+  const [uploadingReference, setUploadingReference] = useState(false);
 
   useEffect(() => {
     fetch("/api/clients").then((r) => r.json()).then((d) => setClients(d.clients || []));
@@ -25,16 +41,43 @@ export default function NewProposalPage() {
     setBusy(true);
     setError("");
     try {
+      if (referenceFile) {
+        setUploadingReference(true);
+        try {
+          const content = await fileToBase64(referenceFile);
+          const res = await fetch("/api/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: referenceFile.name, type: referenceFile.type, content, kind: "reference" }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setError(body.error || "Reference file upload failed.");
+            return;
+          }
+        } finally {
+          setUploadingReference(false);
+        }
+      }
+
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brief, budget, timeline, client: clientName, clientId: clientId || undefined }),
+        body: JSON.stringify({
+          brief,
+          budget,
+          timeline,
+          client: clientName,
+          clientId: clientId || undefined,
+          proposalOptions: { mode, sections: selectedSections, includeVisuals, includeSellerLogo },
+        }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(body.error || "Analysis failed.");
         return;
       }
+      trackEvent("proposal_generated", { projectId: body.projectId });
       router.push(`/proposals/${body.projectId}`);
     } finally {
       setBusy(false);
@@ -99,6 +142,67 @@ export default function NewProposalPage() {
               />
             </div>
           </div>
+          <div>
+            <Label>Proposal mode</Label>
+            <Select value={mode} onChange={(e) => setMode(e.target.value as "Concise" | "Detailed" | "Premium")}>
+              <option value="Concise">Concise</option>
+              <option value="Detailed">Detailed</option>
+              <option value="Premium">Premium</option>
+            </Select>
+          </div>
+          <div>
+            <div className="flex items-center justify-between">
+              <Label>Sections to include</Label>
+              <div className="flex items-center gap-2 text-xs">
+                <button type="button" className="text-accent hover:underline" onClick={() => setSelectedSections([...ALLOWED_SECTIONS])}>
+                  Select all
+                </button>
+                <span className="text-ink-muted">·</span>
+                <button type="button" className="text-accent hover:underline" onClick={() => setSelectedSections([])}>
+                  Select none
+                </button>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {ALLOWED_SECTIONS.map((section) => (
+                <label key={section} className="flex items-center gap-2 text-xs text-ink-secondary">
+                  <input
+                    type="checkbox"
+                    checked={selectedSections.includes(section)}
+                    onChange={(e) =>
+                      setSelectedSections((prev) =>
+                        e.target.checked ? [...prev, section] : prev.filter((v) => v !== section)
+                      )
+                    }
+                  />
+                  <span>{section}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 text-xs text-ink-secondary">
+              <input type="checkbox" checked={includeVisuals} onChange={(e) => setIncludeVisuals(e.target.checked)} />
+              <span>Include charts &amp; visuals</span>
+            </label>
+            <label className="flex items-center gap-2 text-xs text-ink-secondary">
+              <input type="checkbox" checked={includeSellerLogo} onChange={(e) => setIncludeSellerLogo(e.target.checked)} />
+              <span>Include our logo on this proposal</span>
+            </label>
+          </div>
+          <div>
+            <Label>Reference file (optional)</Label>
+            <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
+              <span className="material-symbols-outlined text-[18px]">attach_file</span>
+              <span>{referenceFile ? referenceFile.name : "Attach reference file"}</span>
+              <input
+                type="file"
+                className="hidden"
+                accept=".pdf,.txt,.md,.doc,.docx,image/*"
+                onChange={(e) => setReferenceFile(e.target.files?.[0] || null)}
+              />
+            </label>
+          </div>
         </div>
         {error && (
           <div className="mt-4 rounded-[4px] border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-xs text-status-danger font-mono">
@@ -107,14 +211,14 @@ export default function NewProposalPage() {
         )}
         <div className="mt-6 flex items-center justify-between">
           <Button
-            disabled={busy || brief.trim().length < 40}
+            disabled={busy || brief.trim().length < 40 || selectedSections.length === 0}
             onClick={generate}
             className="flex items-center gap-2"
           >
             {busy ? (
               <>
                 <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
-                Analyzing Scope…
+                {uploadingReference ? "Uploading reference…" : "Analyzing Scope…"}
               </>
             ) : (
               <>
@@ -123,11 +227,25 @@ export default function NewProposalPage() {
               </>
             )}
           </Button>
-          {brief.trim().length > 0 && brief.trim().length < 40 && (
-            <p className="text-xs text-ink-muted">Add at least {40 - brief.trim().length} more characters to brief.</p>
-          )}
+          <div className="text-right space-y-0.5">
+            {brief.trim().length > 0 && brief.trim().length < 40 && (
+              <p className="text-xs text-ink-muted">Add at least {40 - brief.trim().length} more characters to brief.</p>
+            )}
+            {selectedSections.length === 0 && (
+              <p className="text-xs text-ink-muted">Select at least one section.</p>
+            )}
+          </div>
         </div>
       </Card>
     </div>
   );
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }

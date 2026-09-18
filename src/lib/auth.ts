@@ -2,6 +2,11 @@ import { auth, clerkClient } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { HttpError } from "@/lib/http";
 import type { WorkspaceRole } from "@/generated/prisma/enums";
+import { Prisma } from "@/generated/prisma/client";
+
+function isUniqueConstraintError(e: unknown): boolean {
+  return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
+}
 
 export type WorkspaceContext = {
   userId: string;
@@ -57,7 +62,16 @@ export async function requireWorkspaceAuth(): Promise<WorkspaceContext> {
   if (!workspace) {
     const client = await clerkClient();
     const org = await client.organizations.getOrganization({ organizationId: orgId });
-    workspace = await prisma.workspace.create({ data: { id: orgId, name: org.name } });
+    try {
+      workspace = await prisma.workspace.create({ data: { id: orgId, name: org.name } });
+    } catch (e) {
+      // Two concurrent first-requests for the same brand-new workspace (e.g.
+      // onboarding firing several authenticated calls at once) can both miss
+      // the findUnique above and race on create — the loser just re-reads
+      // what the winner committed instead of erroring.
+      if (!isUniqueConstraintError(e)) throw e;
+      workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: orgId } });
+    }
   }
 
   let member = await prisma.workspaceMember.findUnique({
@@ -65,9 +79,16 @@ export async function requireWorkspaceAuth(): Promise<WorkspaceContext> {
   });
   if (!member) {
     const isFirstMember = (await prisma.workspaceMember.count({ where: { workspaceId: orgId } })) === 0;
-    member = await prisma.workspaceMember.create({
-      data: { workspaceId: orgId, userId, role: mapClerkRole(orgRole, isFirstMember) },
-    });
+    try {
+      member = await prisma.workspaceMember.create({
+        data: { workspaceId: orgId, userId, role: mapClerkRole(orgRole, isFirstMember) },
+      });
+    } catch (e) {
+      if (!isUniqueConstraintError(e)) throw e;
+      member = await prisma.workspaceMember.findUniqueOrThrow({
+        where: { workspaceId_userId: { workspaceId: orgId, userId } },
+      });
+    }
   }
 
   return { userId, email: user.email, workspaceId: orgId, role: member.role };

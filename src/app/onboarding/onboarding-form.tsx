@@ -25,6 +25,52 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
   const [plan, setPlan] = useState<(typeof PLANS)[number]["name"]>("Freelancer");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [referenceUploadStatus, setReferenceUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
+
+  async function uploadLogo(file: File) {
+    setUploadingLogo(true);
+    setError("");
+    try {
+      const content = await fileToBase64(file);
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, type: file.type, content, kind: "logo" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.error || "Logo upload failed.");
+        return;
+      }
+      setLogoUrl(body.url || "");
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
+  async function uploadReference(file: File) {
+    setReferenceUploadStatus("uploading");
+    setError("");
+    try {
+      const content = await fileToBase64(file);
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, type: file.type, content, kind: "reference" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.error || "Knowledge base upload failed.");
+        setReferenceUploadStatus("error");
+        return;
+      }
+      setReferenceUploadStatus("done");
+    } catch {
+      setReferenceUploadStatus("error");
+    }
+  }
 
   async function submit() {
     setBusy(true);
@@ -93,6 +139,47 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
         </div>
 
         {isOwner && (
+          <div className="mt-4">
+            <Label>Company logo (optional)</Label>
+            <div className="flex items-center gap-3">
+              {logoUrl && <img src={logoUrl} alt="" className="h-10 w-10 rounded-full object-cover border border-border" />}
+              <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
+                <span className="material-symbols-outlined text-[18px]">
+                  {uploadingLogo ? "progress_activity" : "upload_file"}
+                </span>
+                <span>{uploadingLogo ? "Uploading…" : "Upload logo"}</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])}
+                />
+              </label>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-4">
+          <Label>Seed your knowledge base (optional)</Label>
+          <div className="flex items-center gap-3">
+            <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
+              <span className="material-symbols-outlined text-[18px]">
+                {referenceUploadStatus === "uploading" ? "progress_activity" : "upload_file"}
+              </span>
+              <span>{referenceUploadStatus === "uploading" ? "Uploading…" : "Attach reference file"}</span>
+              <input
+                type="file"
+                className="hidden"
+                accept=".pdf,.txt,.md,.doc,.docx,image/*"
+                onChange={(e) => e.target.files?.[0] && uploadReference(e.target.files[0])}
+              />
+            </label>
+            {referenceUploadStatus === "done" && <span className="text-xs text-success">Added to knowledge base ✓</span>}
+            {referenceUploadStatus === "error" && <span className="text-xs text-danger">Upload failed</span>}
+          </div>
+        </div>
+
+        {isOwner && (
           <>
             <h2 className="mt-8 mb-3 text-sm font-semibold text-foreground">Choose your plan</h2>
             <div className="grid grid-cols-3 gap-3">
@@ -125,4 +212,13 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
       </Card>
     </div>
   );
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }

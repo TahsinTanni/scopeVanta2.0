@@ -6,7 +6,7 @@ import { projectData } from "@/lib/project-data";
 // Public routes (no auth — token-gated), listed in src/proxy.ts's
 // isPublicRoute matcher.
 
-type ShareData = { client: string; questions: string[]; answers: string[]; name?: string; email?: string; submittedAt?: string };
+type ShareData = { client: string; questions: Array<{ question: string; why?: string; answerType?: string } | string>; answers: string[]; name?: string; email?: string; submittedAt?: string };
 
 export const GET = withErrors(async (_req: Request, { params }: { params: Promise<{ token: string }> }) => {
   const { token } = await params;

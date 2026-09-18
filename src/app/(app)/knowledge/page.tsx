@@ -1,10 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, PageHeader, Button, Badge, EmptyState } from "@/components/ui";
+import { Card, PageHeader, Button, Input, Select, Badge, EmptyState } from "@/components/ui";
+import { trackEvent } from "@/lib/track";
 
 type FileItem = { id: string; name: string; status: string; extractedChars: number; error?: string; documentType?: string; summary?: string };
-type KnowledgeRecord = { id: string; category: string; content: { fact: string; sourceFileName: string }; isActive: boolean };
+type KnowledgeRecord = {
+  id: string;
+  category: string;
+  content: { fact: string; sourceFileName: string; documentType?: string };
+  isActive: boolean;
+  createdAt: string;
+};
 type Health = { healthy: boolean; files: number; facts: number; activeFacts: number; recommendation: string };
 
 export default function KnowledgePage() {
@@ -13,6 +20,10 @@ export default function KnowledgePage() {
   const [health, setHealth] = useState<Health | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [factSearch, setFactSearch] = useState("");
+  const [factCategory, setFactCategory] = useState("all");
+  const [factSource, setFactSource] = useState("all");
+  const [factStatus, setFactStatus] = useState("all");
 
   function load() {
     fetch("/api/files").then((r) => r.json()).then((d) => setFiles(d.files || []));
@@ -33,6 +44,7 @@ export default function KnowledgePage() {
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) setError(body.error || "Upload failed.");
+      else if (body.status === "ready") trackEvent("knowledge_ready", { fileId: body.id, documentType: body.documentType });
       load();
     } finally {
       setUploading(false);
@@ -55,6 +67,17 @@ export default function KnowledgePage() {
     await fetch(`/api/files/${id}`, { method: "DELETE" });
     load();
   }
+
+  const factCategories = Array.from(new Set(records.map((r) => r.category))).filter(Boolean);
+  const factSources = Array.from(new Set(records.map((r) => r.content.sourceFileName))).filter(Boolean);
+  const filteredRecords = records.filter((r) => {
+    if (factSearch && !r.content.fact.toLowerCase().includes(factSearch.toLowerCase())) return false;
+    if (factCategory !== "all" && r.category !== factCategory) return false;
+    if (factSource !== "all" && r.content.sourceFileName !== factSource) return false;
+    if (factStatus === "active" && !r.isActive) return false;
+    if (factStatus === "paused" && r.isActive) return false;
+    return true;
+  });
 
   return (
     <div className="space-y-6">
@@ -134,16 +157,53 @@ export default function KnowledgePage() {
       </div>
 
       <div>
-        <h2 className="mb-3 text-sm font-semibold text-ink-primary">Extracted Commercial Facts ({records.length})</h2>
+        <h2 className="mb-3 text-sm font-semibold text-ink-primary">
+          Extracted Commercial Facts ({filteredRecords.length} of {records.length})
+        </h2>
+
+        <div className="mb-3 flex flex-wrap gap-2">
+          <Input
+            placeholder="Search facts…"
+            value={factSearch}
+            onChange={(e) => setFactSearch(e.target.value)}
+            className="max-w-xs"
+          />
+          <Select value={factCategory} onChange={(e) => setFactCategory(e.target.value)} className="w-44 text-xs">
+            <option value="all">All Categories</option>
+            {factCategories.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </Select>
+          <Select value={factSource} onChange={(e) => setFactSource(e.target.value)} className="w-44 text-xs">
+            <option value="all">All Sources</option>
+            {factSources.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </Select>
+          <Select value={factStatus} onChange={(e) => setFactStatus(e.target.value)} className="w-28 text-xs">
+            <option value="all">All</option>
+            <option value="active">Active</option>
+            <option value="paused">Paused</option>
+          </Select>
+        </div>
+
         <div className="space-y-2">
-          {records.map((r) => (
+          {!filteredRecords.length && !!records.length && (
+            <p className="text-xs text-ink-muted">No facts match the current filters.</p>
+          )}
+          {filteredRecords.map((r) => (
             <div
               key={r.id}
               className="flex items-center justify-between rounded-[4px] border border-border-hairline bg-surface-1 px-3.5 py-2.5 text-sm hover:bg-surface-2 transition-colors"
             >
-              <div className="flex items-center gap-3">
-                <Badge tone="neutral">{r.category}</Badge>
-                <span className="text-xs text-ink-secondary">{r.content.fact}</span>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-3">
+                  <Badge tone="neutral">{r.category}</Badge>
+                  <span className="text-xs text-ink-secondary">{r.content.fact}</span>
+                </div>
+                <span className="text-[11px] text-ink-muted font-mono">
+                  {r.content.sourceFileName || "Unknown source"} · {r.content.documentType || "—"} · {new Date(r.createdAt).toLocaleDateString()}
+                </span>
               </div>
               <button
                 onClick={() => toggleActive(r.id, !r.isActive)}

@@ -31,8 +31,25 @@ export const POST = withErrors(async (req: Request, { params }: { params: Promis
     .filter((v) => v.label);
   if (!nodes.length) return error("Add at least one scope graph node.", 400);
   const ids = new Set(nodes.map((v) => v.id));
+  if (ids.size !== nodes.length) {
+    return error("Scope graph nodes must have unique IDs.", 400);
+  }
   if (nodes.some((v) => v.parentId && !ids.has(v.parentId))) {
     return error("Every parent relationship must reference a node in this scope graph.", 400);
+  }
+  const byId = new Map(nodes.map((v) => [v.id, v]));
+  for (const start of nodes) {
+    const visited = new Set<string>([start.id]);
+    let current = start.parentId ? byId.get(start.parentId) : undefined;
+    let steps = 0;
+    while (current && steps < nodes.length) {
+      if (visited.has(current.id)) {
+        return error(`Scope graph has a cycle involving node "${start.id}".`, 400);
+      }
+      visited.add(current.id);
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+      steps++;
+    }
   }
 
   await prisma.commercialAudit.create({

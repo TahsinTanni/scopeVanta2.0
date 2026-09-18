@@ -1,7 +1,8 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { Card, Button, Textarea, Input, Label, Badge, Select } from "@/components/ui";
+import { trackEvent } from "@/lib/track";
 
 type Project = {
   id: string;
@@ -18,9 +19,11 @@ type Project = {
   evidenceStatus: string;
   commercialStale: boolean;
   shareToken: string | null;
+  discoveryShareToken: string | null;
   budget?: string | null;
   timeline?: string | null;
   visuals?: Array<{ type: string; title: string; labels: string[]; values: number[] }> | null;
+  proposalOptions?: { includeSellerLogo?: boolean } | null;
   data: Record<string, unknown> | null;
 };
 
@@ -29,6 +32,41 @@ const DEAL_OS_ACTIONS = [
   "discovery", "compile", "margin", "choices", "negotiation", "change",
   "autopsy", "premortem", "redteam", "personalize", "meeting", "responsibilities", "handoff", "copilot"
 ];
+
+const STUDIO_ACTIONS: Array<{ value: string; label: string }> = [
+  { value: "audit", label: "Proposal Audit" },
+  { value: "coverage", label: "Requirement Coverage" },
+  { value: "modular", label: "Modular Section Builder" },
+  { value: "approaches", label: "Alternative Approaches" },
+  { value: "meeting", label: "Meeting / Call Update" },
+  { value: "objection", label: "Objection Workspace" },
+  { value: "followUp", label: "Follow-up Draft" },
+];
+
+// The six-step rail's step keys, in display order. "propose" is excluded
+// from the Expand All / Collapse All "all expanded" calculation since its
+// Client Proposal Document card is always visible regardless of this set.
+const STEP_KEYS = ["understand", "scope", "price", "propose", "win", "protect"] as const;
+const STEP_LABELS: Record<(typeof STEP_KEYS)[number], string> = {
+  understand: "Understand",
+  scope: "Scope",
+  price: "Price",
+  propose: "Propose",
+  win: "Win",
+  protect: "Protect",
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function detectStudioShape(s: any): "audit" | "coverage" | "sections" | "approaches" | "meeting" | "objection" | "followUp" | "unknown" {
+  if (Array.isArray(s) && s[0]?.title !== undefined) return "sections";
+  if (Array.isArray(s) && s[0]?.name !== undefined) return "approaches";
+  if (typeof s?.score === "number") return "audit";
+  if (typeof s?.covered === "number") return "coverage";
+  if (Array.isArray(s?.newRequirements)) return "meeting";
+  if (typeof s?.objection === "string") return "objection";
+  if (typeof s?.subject === "string") return "followUp";
+  return "unknown";
+}
 
 function parseProposalSections(text: string): Array<{ title: string; lines: string[] }> {
   if (!text) return [];
@@ -71,7 +109,9 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   const [proposalDraft, setProposalDraft] = useState("");
   const [answers, setAnswers] = useState<string[]>([]);
   const [readiness, setReadiness] = useState<{ checks: Array<{ label: string; pass: boolean }>; readyToShare: boolean } | null>(null);
-  const [versions, setVersions] = useState<Array<{ version: number; savedAt: string; status: string }>>([]);
+  const [versions, setVersions] = useState<Array<{ version: number; savedAt: string; status: string; proposal: string; revisionSource: string }>>([]);
+  const [restoredVersion, setRestoredVersion] = useState<number | null>(null);
+  const editorCardRef = useRef<HTMLDivElement>(null);
   const [shareAnalytics, setShareAnalytics] = useState<{ views: number; lastViewedAt: string; selectedScenario: string } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -84,7 +124,23 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   const [dealOSResult, setDealOSResult] = useState<unknown>(null);
   const [labResult, setLabResult] = useState<unknown>(null);
   const [lines, setLines] = useState<Array<{ name: string; role: string; qty: number; hours: number; costRate: number; sellRate: number; acceptance?: string }>>([]);
+  const [graphNodes, setGraphNodes] = useState<Array<{ id: string; type: string; label: string; parentId: string; hours: number; acceptance: string }>>([]);
   const [scenarios, setScenarios] = useState<Array<{ name: string; price: number; hours: number; marginPct: number }>>([]);
+  const [actualRevenue, setActualRevenue] = useState(0);
+  const [actualCost, setActualCost] = useState(0);
+  const [actualHours, setActualHours] = useState(0);
+  const [clientRequestInbox, setClientRequestInbox] = useState("");
+  const [changeRequest, setChangeRequest] = useState("");
+  const [history, setHistory] = useState<{ baselines: Array<{ id: string; createdAt: string; snapshot: { version?: number } }>; changeOrders: Array<{ id: string; createdAt: string; status: string }> }>({ baselines: [], changeOrders: [] });
+  const [copiedChangeOrder, setCopiedChangeOrder] = useState(false);
+  const [copiedFollowUp, setCopiedFollowUp] = useState(false);
+  const [copiedWinPlanFollowUp, setCopiedWinPlanFollowUp] = useState(false);
+  const [studioAction, setStudioAction] = useState("audit");
+  const [studioInput, setStudioInput] = useState("");
+  const [copiedStudioFollowUp, setCopiedStudioFollowUp] = useState(false);
+  const [copiedDiscoveryLink, setCopiedDiscoveryLink] = useState(false);
+  const [sellerLogoPath, setSellerLogoPath] = useState("");
+  const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set(["understand"]));
 
   async function load() {
     const res = await fetch(`/api/projects/${id}`).then((r) => r.json()).catch(() => null);
@@ -92,6 +148,8 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
     fetch(`/api/projects/${id}/readiness`).then((r) => r.json()).then(setReadiness).catch(() => {});
     fetch(`/api/projects/${id}/versions`).then((r) => r.json()).then((d) => setVersions(d.versions || [])).catch(() => {});
     fetch(`/api/projects/${id}/share-analytics`).then((r) => r.json()).then(setShareAnalytics).catch(() => {});
+    fetch(`/api/projects/${id}/commercial-history`).then((r) => r.json()).then((d) => setHistory({ baselines: d.baselines || [], changeOrders: d.changeOrders || [] })).catch(() => {});
+    fetch(`/api/workspace/profile`).then((r) => r.json()).then((d) => setSellerLogoPath(d.profile?.logoPath || "")).catch(() => {});
   }
 
   function applyProject(p: Project) {
@@ -100,7 +158,12 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
     setAnswers((p.clarificationQuestions || []).map(() => ""));
     const d = (p.data || {}) as Record<string, unknown>;
     setLines((d.estimateLines as typeof lines) || []);
+    setGraphNodes((d.scopeGraph as typeof graphNodes) || []);
     setScenarios((d.dealScenarios as typeof scenarios) || []);
+    setActualRevenue((d.actualRevenue as number) || 0);
+    setActualCost((d.actualCost as number) || 0);
+    setActualHours((d.actualHours as number) || 0);
+    setClientRequestInbox((d.clientRequestInbox as string) || "");
   }
 
   useEffect(() => {
@@ -127,14 +190,33 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   async function saveProposal() {
     const data = await call(`/api/projects/${id}/proposal`, { proposal: proposalDraft });
     if (data) {
+      if (!data.unchanged) trackEvent("proposal_edited", { projectId: id });
       load();
       setViewMode("preview");
     }
   }
 
+  function restoreVersion(version: (typeof versions)[number]) {
+    const hasUnsavedEdits = proposalDraft !== (project?.proposal || "");
+    if (hasUnsavedEdits) {
+      const confirmed = window.confirm(
+        `You have unsaved changes in the editor. Restoring version ${version.version} will discard them. Continue?`
+      );
+      if (!confirmed) return;
+    }
+    setProposalDraft(version.proposal);
+    setViewMode("edit");
+    editorCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setRestoredVersion(version.version);
+    setTimeout(() => setRestoredVersion(null), 2000);
+  }
+
   async function refine() {
     const data = await call(`/api/projects/${id}/refine`, { answers });
-    if (data) load();
+    if (data) {
+      trackEvent("proposal_refined", { projectId: id });
+      load();
+    }
   }
 
   async function updateDeal(patch: { dealStage?: string; dealValue?: number }) {
@@ -150,12 +232,80 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
     }
   }
 
+  async function saveScopeGraph() {
+    const data = await call(`/api/projects/${id}/scope-graph`, { nodes: graphNodes });
+    if (data) load();
+  }
+
+  async function saveActuals() {
+    const data = await call(`/api/projects/${id}/commercial-state`, { estimateLines: lines, actualRevenue, actualCost, actualHours, clientRequest: clientRequestInbox });
+    if (data) load();
+  }
+
   async function runCommercialLab() {
-    const data = await call(`/api/projects/${id}/commercial-lab`, { internalRate: 0, targetMargin: 35 });
+    const data = await call(`/api/projects/${id}/commercial-lab`, { internalRate: 0, targetMargin: 35, changeRequest });
     if (data) {
       setLabResult(data.commercialLab);
+      setChangeRequest("");
       load();
     }
+  }
+
+  async function establishBaseline() {
+    const data = await call(`/api/projects/${id}/scope-baseline`);
+    if (data) load();
+  }
+
+  async function approveChangeOrder() {
+    const data = await call(`/api/projects/${id}/change-order/approve`);
+    if (data) load();
+  }
+
+  function handleCopyChangeOrder() {
+    navigator.clipboard.writeText(String(project?.data?.changeOrderDraft || ""));
+    setCopiedChangeOrder(true);
+    setTimeout(() => setCopiedChangeOrder(false), 2000);
+  }
+
+  async function getClosingGuidance() {
+    const data = await call(`/api/projects/${id}/close-coach`);
+    if (data) load();
+  }
+
+  function handleCopyFollowUp() {
+    navigator.clipboard.writeText(String((project?.data?.closeCoach as { followUp?: string } | undefined)?.followUp || ""));
+    setCopiedFollowUp(true);
+    setTimeout(() => setCopiedFollowUp(false), 2000);
+  }
+
+  async function buildWinPlan() {
+    const data = await call(`/api/projects/${id}/win-plan`);
+    if (data) load();
+  }
+
+  function handleCopyWinPlanFollowUp() {
+    navigator.clipboard.writeText(String((project?.data?.winPlan as { followUp?: string } | undefined)?.followUp || ""));
+    setCopiedWinPlanFollowUp(true);
+    setTimeout(() => setCopiedWinPlanFollowUp(false), 2000);
+  }
+
+  async function runProposalStudio() {
+    const data = await call(`/api/projects/${id}/proposal-studio`, { action: studioAction, input: studioInput });
+    if (data) {
+      setStudioInput("");
+      load();
+    }
+  }
+
+  function handleCopyStudioFollowUp() {
+    navigator.clipboard.writeText(String((project?.data?.proposalStudio as { body?: string } | undefined)?.body || ""));
+    setCopiedStudioFollowUp(true);
+    setTimeout(() => setCopiedStudioFollowUp(false), 2000);
+  }
+
+  async function runAutopilot() {
+    const data = await call(`/api/projects/${id}/commercial-autopilot`);
+    if (data) load();
   }
 
   async function runDealOS() {
@@ -174,6 +324,24 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   async function revokeShare() {
     const data = await call(`/api/projects/${id}/share/revoke`);
     if (data) load();
+  }
+
+  async function createDiscoveryShare() {
+    const data = await call(`/api/projects/${id}/discovery-share`);
+    if (data) load();
+  }
+
+  async function revokeDiscoveryShare() {
+    const data = await call(`/api/projects/${id}/discovery-share/revoke`);
+    if (data) load();
+  }
+
+  function handleCopyDiscoveryLink() {
+    navigator.clipboard.writeText(
+      `${typeof window !== "undefined" ? window.location.origin : ""}/discovery/${project?.discoveryShareToken || ""}`
+    );
+    setCopiedDiscoveryLink(true);
+    setTimeout(() => setCopiedDiscoveryLink(false), 2000);
   }
 
   function handleCopy() {
@@ -275,7 +443,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
       </html>
     `;
 
-    const blob = new Blob(["\ufeff" + docContent], { type: "application/msword;charset=utf-8" });
+    const blob = new Blob(["﻿" + docContent], { type: "application/msword;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -285,6 +453,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   }
 
   function handlePrintPDF() {
+    trackEvent("proposal_printed", { projectId: id });
     window.print();
   }
 
@@ -293,6 +462,83 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   if (!project) return <p className="text-sm text-foreground-muted">Loading…</p>;
 
   const parsedSections = parseProposalSections(proposalDraft);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const studio = project.data?.proposalStudio as any;
+  const studioShape = detectStudioShape(studio);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const autopilot = project.data?.commercialAutopilot as any;
+
+  function graphNodeDepth(node: (typeof graphNodes)[number]): number {
+    let depth = 0;
+    let current = node;
+    for (let steps = 0; steps < graphNodes.length && current.parentId; steps++) {
+      const parent = graphNodes.find((n) => n.id === current.parentId);
+      if (!parent) break;
+      depth++;
+      current = parent;
+    }
+    return depth;
+  }
+
+  function toggleStep(key: string) {
+    setExpandedSteps((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function expandAndScrollTo(key: string) {
+    setExpandedSteps((prev) => new Set(prev).add(key));
+    document.getElementById(`step-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function expandAllSteps() {
+    setExpandedSteps(new Set(STEP_KEYS));
+  }
+
+  function collapseAllSteps() {
+    setExpandedSteps(new Set(["understand"]));
+  }
+
+  const coreSteps = ["understand", "scope", "price", "win", "protect"];
+  const allCoreExpanded = coreSteps.every((k) => expandedSteps.has(k));
+
+  // Only wired to fields this file already confirms exist on project.data
+  // elsewhere (winPlan, scopeGraph, proposalStudio, scopeBaseline,
+  // clientDiscovery) — "price" has no confirmed persisted flag for whether
+  // Opportunity Lab has been run, so it's deliberately left without a dot
+  // rather than guessing one.
+  const stepHasContent: Record<string, boolean> = {
+    understand: !!project.data?.clientDiscovery,
+    scope: !!(project.data?.scopeGraph as unknown[] | undefined)?.length,
+    price: false,
+    propose: !!project.data?.proposalStudio,
+    win: !!project.data?.winPlan,
+    protect: !!project.data?.scopeBaseline,
+  };
+
+  const understandCount = (project.brief ? 1 : 0) + ((project.clarificationQuestions || []).length ? 1 : 0) + 1;
+
+  function StepHeader({ stepKey, count }: { stepKey: (typeof STEP_KEYS)[number]; count: number }) {
+    const expanded = expandedSteps.has(stepKey);
+    return (
+      <button
+        onClick={() => toggleStep(stepKey)}
+        className="no-print flex w-full items-center justify-between py-2 text-left"
+      >
+        <span className="text-sm font-semibold text-ink-primary font-display">
+          {STEP_LABELS[stepKey]} <span className="text-xs font-mono text-ink-muted">({count})</span>
+        </span>
+        <span
+          className={`material-symbols-outlined text-[20px] text-ink-muted transition-transform ${expanded ? "rotate-180" : ""}`}
+        >
+          expand_more
+        </span>
+      </button>
+    );
+  }
 
   return (
     <div className="max-w-6xl space-y-6 print:max-w-none print:space-y-4">
@@ -446,6 +692,9 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
 
       {/* HIDDEN PRINT-ONLY CONTAINER (USED FOR CLEAN BROWSER PDF PRINTING) */}
       <div id="printable-proposal-doc" className="hidden print:block bg-white text-gray-900 p-8 font-sans">
+        {project.proposalOptions?.includeSellerLogo && sellerLogoPath && (
+          <img src={sellerLogoPath} alt="" className="max-h-12 mb-4" />
+        )}
         <div className="border-b-2 border-blue-600 pb-4 mb-6">
           <h1 className="text-2xl font-bold tracking-tight text-blue-900">{project.clientLabel || "Client Proposal"}</h1>
           <p className="text-sm font-medium text-gray-500 mt-1">Commercial Scope & Delivery Proposal</p>
@@ -526,66 +775,24 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
         </div>
       )}
 
-      {/* INITIAL CLIENT BRIEF & INTAKE SECTION */}
-      {project.brief && (
-        <Card className="no-print border-border-hairline bg-surface-1 p-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="material-symbols-outlined text-accent text-[18px]">assignment</span>
-              <h2 className="text-sm font-semibold text-ink-primary font-display">Original Client Request & Intake Context</h2>
-            </div>
+      {/* SIX-STEP RAIL */}
+      <div className="no-print sticky top-0 z-40 flex flex-wrap items-center justify-between gap-2 border-b border-border-hairline bg-surface-0 py-2.5">
+        <div className="flex items-center gap-1">
+          {STEP_KEYS.map((key) => (
             <button
-              onClick={() => setBriefExpanded(!briefExpanded)}
-              className="text-xs text-ink-muted hover:text-ink-primary font-mono transition-colors"
+              key={key}
+              onClick={() => expandAndScrollTo(key)}
+              className="relative rounded-[4px] px-3 py-1.5 text-xs font-medium text-ink-secondary hover:bg-surface-2 hover:text-ink-primary transition-colors"
             >
-              {briefExpanded ? "Hide Details" : "Show Brief"}
+              {STEP_LABELS[key]}
+              {stepHasContent[key] && <span className="absolute top-1 right-1.5 h-1.5 w-1.5 rounded-full bg-accent" />}
             </button>
-          </div>
-
-          {briefExpanded && (
-            <div className="mt-4 space-y-3">
-              <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 text-xs leading-relaxed text-ink-secondary whitespace-pre-wrap font-body">
-                {project.brief}
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-xs font-mono tabular-nums">
-                {project.budget && (
-                  <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
-                    <span className="text-ink-muted block text-[11px]">Target Budget</span>
-                    <span className="font-semibold text-ink-primary">{project.budget}</span>
-                  </div>
-                )}
-                {project.timeline && (
-                  <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
-                    <span className="text-ink-muted block text-[11px]">Target Timeline</span>
-                    <span className="font-semibold text-ink-primary">{project.timeline}</span>
-                  </div>
-                )}
-                <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
-                  <span className="text-ink-muted block text-[11px]">Diagnostic Risk Score</span>
-                  <span className="font-semibold text-ink-primary">{project.riskScore ?? 50}/100</span>
-                </div>
-              </div>
-
-              {project.risks && project.risks.length > 0 && (
-                <div className="mt-3 border-t border-border-hairline/60 pt-3">
-                  <span className="text-xs font-semibold text-ink-muted uppercase tracking-wider block mb-2 font-mono">
-                    Identified Commercial Risks:
-                  </span>
-                  <ul className="space-y-1.5 text-xs text-ink-secondary">
-                    {project.risks.map((risk, idx) => (
-                      <li key={idx} className="flex items-start gap-2">
-                        <span className="text-status-warning mt-0.5">•</span>
-                        <span>{risk}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-        </Card>
-      )}
+          ))}
+        </div>
+        <Button variant="secondary" className="text-xs py-1 px-2.5" onClick={allCoreExpanded ? collapseAllSteps : expandAllSteps}>
+          {allCoreExpanded ? "Collapse All" : "Expand All"}
+        </Button>
+      </div>
 
       {/* READINESS CHECKLIST */}
       {readiness && (
@@ -604,375 +811,1492 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
         </Card>
       )}
 
-      {/* SCOPE ARCHITECTURE & MILESTONES DIAGRAM */}
-      <Card className="no-print border-border-hairline bg-surface-1 p-5">
-        <div className="flex items-center justify-between border-b border-border-hairline pb-3">
-          <div>
-            <h2 className="text-sm font-semibold text-ink-primary font-display">Scope Architecture & Milestone Roadmap</h2>
-            <p className="text-xs text-ink-muted">Visual delivery phases and execution trajectory</p>
-          </div>
-          <Badge tone="neutral">Interactive Diagram</Badge>
-        </div>
-
-        <div className="mt-4 space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
-            {[
-              { phase: "Phase 1", title: "Discovery & Audit", dur: "Wk 1-2", desc: "UX friction, mobile checkout analytics, technical audit" },
-              { phase: "Phase 2", title: "Core Redesign", dur: "Wk 3-5", desc: "Shopify checkout flow, page speed optimization, photography" },
-              { phase: "Phase 3", title: "Integration", dur: "Wk 6-7", desc: "Klaviyo abandoned cart flow setup, QA & testing" },
-              { phase: "Phase 4", title: "Launch & Sign-off", dur: "Wk 8", desc: "Pre-Black Friday release, performance monitoring" },
-            ].map((step, idx) => (
-              <div key={idx} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 relative overflow-hidden flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between text-[11px] text-ink-muted font-mono tabular-nums">
-                    <span className="font-semibold text-accent">{step.phase}</span>
-                    <span>{step.dur}</span>
+      {/* STEP: UNDERSTAND */}
+      <div id="step-understand">
+        <StepHeader stepKey="understand" count={understandCount} />
+        {expandedSteps.has("understand") && (
+          <div className="mt-2 space-y-6">
+            {/* INITIAL CLIENT BRIEF & INTAKE SECTION */}
+            {project.brief && (
+              <Card className="no-print border-border-hairline bg-surface-1 p-5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-accent text-[18px]">assignment</span>
+                    <h2 className="text-sm font-semibold text-ink-primary font-display">Original Client Request & Intake Context</h2>
                   </div>
-                  <h4 className="text-xs font-semibold text-ink-primary mt-1.5">{step.title}</h4>
-                  <p className="text-[11px] text-ink-secondary mt-1 leading-snug">{step.desc}</p>
+                  <button
+                    onClick={() => setBriefExpanded(!briefExpanded)}
+                    className="text-xs text-ink-muted hover:text-ink-primary font-mono transition-colors"
+                  >
+                    {briefExpanded ? "Hide Details" : "Show Brief"}
+                  </button>
                 </div>
-                <div className="mt-3 h-1 w-full rounded-full bg-surface-3 overflow-hidden">
-                  <div className="h-full bg-accent" style={{ width: `${(idx + 1) * 25}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </Card>
 
-      {/* PROPOSAL PRESENTATION & EDITOR */}
-      <Card className="border-border-hairline bg-surface-1 p-5 print:border-none print:p-0 print:shadow-none">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border-hairline pb-3 no-print">
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold text-ink-primary font-display">Client Proposal Document</h2>
-            <Badge tone="neutral">{parsedSections.length} Sections</Badge>
-          </div>
+                {briefExpanded && (
+                  <div className="mt-4 space-y-3">
+                    <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 text-xs leading-relaxed text-ink-secondary whitespace-pre-wrap font-body">
+                      {project.brief}
+                    </div>
 
-          <div className="flex items-center gap-2">
-            <div className="inline-flex rounded-[4px] border border-border-hairline p-0.5 bg-surface-2">
-              <button
-                onClick={() => setViewMode("preview")}
-                className={`rounded-[2px] px-3 py-1 text-xs font-medium transition-colors ${
-                  viewMode === "preview" ? "bg-surface-3 text-ink-primary shadow-sm" : "text-ink-muted hover:text-ink-primary"
-                }`}
-              >
-                Executive Document View
-              </button>
-              <button
-                onClick={() => setViewMode("edit")}
-                className={`rounded-[2px] px-3 py-1 text-xs font-medium transition-colors ${
-                  viewMode === "edit" ? "bg-surface-3 text-ink-primary shadow-sm" : "text-ink-muted hover:text-ink-primary"
-                }`}
-              >
-                Edit Text
-              </button>
-            </div>
-
-            <Button variant="ghost" onClick={handleCopy} className="text-xs py-1 px-2.5">
-              {copied ? "Copied ✓" : "Copy"}
-            </Button>
-          </div>
-        </div>
-
-        {/* FORMATTED EXECUTIVE PREVIEW MODE */}
-        {viewMode === "preview" ? (
-          <div className="mt-4 space-y-6">
-            {/* Document Header for Print / View */}
-            <div className="border-b border-border-hairline pb-4 print:border-black">
-              <h2 className="text-xl font-display font-medium tracking-tight text-ink-primary print:text-black">
-                {project.clientLabel || "Client Proposal"}
-              </h2>
-              <div className="mt-1 flex flex-wrap gap-4 text-xs font-mono tabular-nums text-ink-muted print:text-black">
-                {project.budget && <span>Budget: <strong className="text-ink-primary print:text-black">{project.budget}</strong></span>}
-                {project.timeline && <span>Timeline: <strong className="text-ink-primary print:text-black">{project.timeline}</strong></span>}
-                <span>Prepared by: <strong className="text-ink-primary print:text-black">ScopeVanta</strong></span>
-              </div>
-            </div>
-
-            {/* Render Parsed Sections */}
-            {parsedSections.map((sec, idx) => (
-              <div key={idx} className="proposal-document-section space-y-2.5 rounded-[4px] border border-border-hairline bg-surface-2 p-4 print:border-none print:p-0">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-accent print:text-black font-mono">
-                  {sec.title}
-                </h3>
-                <div className="space-y-1.5 text-xs leading-relaxed text-ink-secondary print:text-black font-body">
-                  {sec.lines.map((line, lIdx) => {
-                    const trimmed = line.trim();
-                    if (!trimmed) return <div key={lIdx} className="h-1.5" />;
-                    const isBullet = trimmed.startsWith("-") || trimmed.startsWith("*") || trimmed.startsWith("•");
-                    if (isBullet) {
-                      const content = trimmed.replace(/^[-*•]\s*/, "");
-                      return (
-                        <div key={lIdx} className="flex items-start gap-2 pl-2">
-                          <span className="text-accent mt-0.5 print:text-black">•</span>
-                          <span>{content}</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 text-xs font-mono tabular-nums">
+                      {project.budget && (
+                        <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
+                          <span className="text-ink-muted block text-[11px]">Target Budget</span>
+                          <span className="font-semibold text-ink-primary">{project.budget}</span>
                         </div>
-                      );
-                    }
-                    return <p key={lIdx}>{line}</p>;
-                  })}
-                </div>
-              </div>
-            ))}
+                      )}
+                      {project.timeline && (
+                        <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
+                          <span className="text-ink-muted block text-[11px]">Target Timeline</span>
+                          <span className="font-semibold text-ink-primary">{project.timeline}</span>
+                        </div>
+                      )}
+                      <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
+                        <span className="text-ink-muted block text-[11px]">Diagnostic Risk Score</span>
+                        <span className="font-semibold text-ink-primary">{project.riskScore ?? 50}/100</span>
+                      </div>
+                    </div>
 
-            {/* Scope Visuals if generated */}
-            {project.visuals && project.visuals.length > 0 && (
-              <div className="no-print rounded-[4px] border border-border-hairline bg-surface-2 p-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-accent mb-3 font-mono">
-                  Project Visuals & Analytics
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {project.visuals.map((vis, vIdx) => (
-                    <div key={vIdx} className="rounded-[4px] border border-border-hairline bg-surface-1 p-3.5">
-                      <p className="text-xs font-semibold text-ink-primary mb-2">{vis.title}</p>
-                      <div className="space-y-2">
-                        {vis.labels.map((label, lIdx) => {
-                          const val = vis.values[lIdx] ?? 0;
-                          const max = Math.max(...vis.values, 1);
-                          const pct = Math.round((val / max) * 100);
-                          return (
-                            <div key={lIdx} className="space-y-1">
-                              <div className="flex justify-between text-[11px] font-mono tabular-nums text-ink-muted">
-                                <span>{label}</span>
-                                <span>{val}</span>
-                              </div>
-                              <div className="h-1.5 w-full rounded-full bg-surface-3 overflow-hidden">
-                                <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
-                              </div>
-                            </div>
-                          );
-                        })}
+                    {project.risks && project.risks.length > 0 && (
+                      <div className="mt-3 border-t border-border-hairline/60 pt-3">
+                        <span className="text-xs font-semibold text-ink-muted uppercase tracking-wider block mb-2 font-mono">
+                          Identified Commercial Risks:
+                        </span>
+                        <ul className="space-y-1.5 text-xs text-ink-secondary">
+                          {project.risks.map((risk, idx) => (
+                            <li key={idx} className="flex items-start gap-2">
+                              <span className="text-status-warning mt-0.5">•</span>
+                              <span>{risk}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            )}
+
+            {/* CLARIFICATION QUESTIONS */}
+            {!!(project.clarificationQuestions || []).length && (
+              <Card className="no-print border-border-hairline bg-surface-1 p-5">
+                <div className="flex items-center justify-between border-b border-border-hairline pb-2">
+                  <div>
+                    <h2 className="text-sm font-semibold text-ink-primary font-display">Clarification Questions (Scope Resolver)</h2>
+                    <p className="text-xs text-ink-muted">Answer these questions to remove assumptions and make your proposal watertight.</p>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-3">
+                  {(project.clarificationQuestions || []).map((q, i) => (
+                    <div key={i} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3.5">
+                      <Label>{q}</Label>
+                      <Input
+                        placeholder="Type answer or confirmed detail..."
+                        value={answers[i] || ""}
+                        onChange={(e) => setAnswers((a) => a.map((v, idx) => (idx === i ? e.target.value : v)))}
+                        className="mt-1"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <Button className="mt-4" disabled={busy === `/api/projects/${id}/refine`} onClick={refine}>
+                  Refine & Regenerate Proposal
+                </Button>
+              </Card>
+            )}
+
+            {/* DISCOVERY LINK */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="border-b border-border-hairline pb-2">
+                <h2 className="text-sm font-semibold text-ink-primary font-display">Discovery Link</h2>
+                <p className="text-xs text-ink-muted">Send buyer-facing discovery questions and collect answers before scoping.</p>
+              </div>
+
+              {!project.discoveryShareToken ? (
+                <div className="mt-4 space-y-3">
+                  <p className="text-xs text-ink-muted">Run Discovery Agent in Deal-to-Profit OS above, then create a discovery link to collect buyer answers before scoping.</p>
+                  <Button disabled={busy === `/api/projects/${id}/discovery-share`} onClick={createDiscoveryShare}>
+                    Create Discovery Link
+                  </Button>
+                </div>
+              ) : (
+                <div className="mt-4 space-y-3 text-sm">
+                  <Badge
+                    tone={
+                      project.data?.discoveryShareStatus === "submitted" ? "verified" :
+                      project.data?.discoveryShareStatus === "revoked" ? "danger" : "success"
+                    }
+                  >
+                    {project.data?.discoveryShareStatus === "submitted" ? "Submitted" :
+                      project.data?.discoveryShareStatus === "revoked" ? "Revoked" : "Open — awaiting buyer"}
+                  </Badge>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a
+                      href={`/discovery/${project.discoveryShareToken}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-accent hover:underline text-xs font-mono break-all inline-flex items-center gap-1.5 bg-surface-2 px-3 py-2 rounded-[4px] border border-border-hairline"
+                    >
+                      <span>{typeof window !== "undefined" ? `${window.location.origin}/discovery/${project.discoveryShareToken}` : `/discovery/${project.discoveryShareToken}`}</span>
+                      <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                    </a>
+                    <Button variant="secondary" onClick={handleCopyDiscoveryLink} className="text-xs py-1.5 px-3 shrink-0">
+                      {copiedDiscoveryLink ? "Copied ✓" : "Copy Link"}
+                    </Button>
+                  </div>
+
+                  {project.data?.discoveryShareStatus === "open" && (
+                    <div>
+                      <Button variant="danger" onClick={revokeDiscoveryShare} className="text-xs py-1 px-3">Revoke Link</Button>
+                    </div>
+                  )}
+
+                  {!!project.data?.clientDiscovery && (
+                    <div className="mt-2 space-y-3 border-t border-border-hairline/60 pt-3">
+                      {(project.data.clientDiscovery as { questions: Array<{ question: string; why?: string; answerType?: string } | string>; answers: string[] }).questions.map((q, i) => {
+                        const a = (project.data!.clientDiscovery as { answers: string[] }).answers[i];
+                        if (!a || !a.trim()) return null;
+                        return (
+                          <div key={i}>
+                            <p className="text-xs font-medium text-ink-primary">{typeof q === "string" ? q : q.question}</p>
+                            <p className="mt-0.5 text-sm text-ink-secondary">{a}</p>
+                          </div>
+                        );
+                      })}
+                      <p className="text-[11px] text-ink-muted font-mono tabular-nums">
+                        Submitted by {(project.data.clientDiscovery as { name: string }).name} (
+                        {(project.data.clientDiscovery as { email: string }).email}) on{" "}
+                        {new Date((project.data.clientDiscovery as { submittedAt: string }).submittedAt).toLocaleString()}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+      </div>
+
+      {/* STEP: SCOPE */}
+      <div id="step-scope">
+        <StepHeader stepKey="scope" count={2} />
+        {expandedSteps.has("scope") && (
+          <div className="mt-2 space-y-6">
+            {/* SCOPE ARCHITECTURE & MILESTONES DIAGRAM */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="flex items-center justify-between border-b border-border-hairline pb-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink-primary font-display">Scope Architecture & Milestone Roadmap</h2>
+                  <p className="text-xs text-ink-muted">Visual delivery phases and execution trajectory</p>
+                </div>
+                <Badge tone="neutral">Interactive Diagram</Badge>
+              </div>
+
+              <div className="mt-4 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
+                  {[
+                    { phase: "Phase 1", title: "Discovery & Audit", dur: "Wk 1-2", desc: "UX friction, mobile checkout analytics, technical audit" },
+                    { phase: "Phase 2", title: "Core Redesign", dur: "Wk 3-5", desc: "Shopify checkout flow, page speed optimization, photography" },
+                    { phase: "Phase 3", title: "Integration", dur: "Wk 6-7", desc: "Klaviyo abandoned cart flow setup, QA & testing" },
+                    { phase: "Phase 4", title: "Launch & Sign-off", dur: "Wk 8", desc: "Pre-Black Friday release, performance monitoring" },
+                  ].map((step, idx) => (
+                    <div key={idx} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 relative overflow-hidden flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] text-ink-muted font-mono tabular-nums">
+                          <span className="font-semibold text-accent">{step.phase}</span>
+                          <span>{step.dur}</span>
+                        </div>
+                        <h4 className="text-xs font-semibold text-ink-primary mt-1.5">{step.title}</h4>
+                        <p className="text-[11px] text-ink-secondary mt-1 leading-snug">{step.desc}</p>
+                      </div>
+                      <div className="mt-3 h-1 w-full rounded-full bg-surface-3 overflow-hidden">
+                        <div className="h-full bg-accent" style={{ width: `${(idx + 1) * 25}%` }} />
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
-            )}
-          </div>
-        ) : (
-          /* RAW TEXTAREA EDIT MODE */
-          <div className="mt-4">
-            <Textarea
-              rows={20}
-              className="font-mono text-xs leading-relaxed"
-              value={proposalDraft}
-              onChange={(e) => setProposalDraft(e.target.value)}
-            />
-            <div className="mt-3 flex items-center justify-between">
-              <span className="text-xs font-mono tabular-nums text-ink-muted">
-                {proposalDraft.split(/\s+/).filter(Boolean).length} words · {proposalDraft.length} characters
-              </span>
-              <Button disabled={busy === `/api/projects/${id}/proposal`} onClick={saveProposal}>
-                Save proposal
-              </Button>
-            </div>
+            </Card>
+
+            {/* SCOPE GRAPH */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="flex items-center justify-between border-b border-border-hairline pb-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink-primary font-display">Scope Graph</h2>
+                  <p className="text-xs text-ink-muted">Structure requirements into phases, deliverables, and tasks — feeds Deal-to-Profit OS and the scope baseline.</p>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {graphNodes.length === 0 && (
+                  <p className="text-xs text-ink-muted">No nodes yet — add a requirement, phase, or deliverable to start structuring this opportunity.</p>
+                )}
+                {graphNodes.map((node, i) => (
+                  <div key={node.id} className="grid grid-cols-12 gap-2 text-sm items-center" style={{ paddingLeft: graphNodeDepth(node) * 16 }}>
+                    <Select
+                      value={node.type}
+                      onChange={(e) => setGraphNodes((ns) => ns.map((n, idx) => (idx === i ? { ...n, type: e.target.value } : n)))}
+                      className="col-span-2"
+                    >
+                      {["requirement", "phase", "deliverable", "task", "economics", "acceptance"].map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </Select>
+                    <Input
+                      placeholder="What is this node?"
+                      value={node.label}
+                      onChange={(e) => setGraphNodes((ns) => ns.map((n, idx) => (idx === i ? { ...n, label: e.target.value } : n)))}
+                      className="col-span-4"
+                    />
+                    <Select
+                      value={node.parentId}
+                      onChange={(e) => setGraphNodes((ns) => ns.map((n, idx) => (idx === i ? { ...n, parentId: e.target.value } : n)))}
+                      className="col-span-2"
+                    >
+                      <option value="">— none (root) —</option>
+                      {graphNodes.filter((n) => n.id !== node.id).map((n) => (
+                        <option key={n.id} value={n.id}>{n.label || n.id}</option>
+                      ))}
+                    </Select>
+                    <Input
+                      type="number"
+                      value={node.hours}
+                      onChange={(e) => setGraphNodes((ns) => ns.map((n, idx) => (idx === i ? { ...n, hours: Number(e.target.value) } : n)))}
+                      className="col-span-1 font-mono tabular-nums text-xs"
+                    />
+                    <Input
+                      placeholder="Acceptance criteria"
+                      value={node.acceptance}
+                      onChange={(e) => setGraphNodes((ns) => ns.map((n, idx) => (idx === i ? { ...n, acceptance: e.target.value } : n)))}
+                      className="col-span-2"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setGraphNodes((ns) => ns.filter((_, idx) => idx !== i))}
+                      className="col-span-1 p-2 text-status-danger hover:bg-status-danger/10 rounded-[4px] text-center font-bold text-sm transition-colors"
+                      title="Remove node"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 flex gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    setGraphNodes((ns) => [
+                      ...ns,
+                      {
+                        id: `node-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+                        type: "deliverable",
+                        label: "",
+                        parentId: "",
+                        hours: 0,
+                        acceptance: "",
+                      },
+                    ])
+                  }
+                >
+                  + Add Node
+                </Button>
+                <Button
+                  disabled={busy === `/api/projects/${id}/scope-graph`}
+                  onClick={saveScopeGraph}
+                >
+                  Save Scope Graph
+                </Button>
+              </div>
+            </Card>
           </div>
         )}
-      </Card>
+      </div>
 
-      {/* CLARIFICATION QUESTIONS */}
-      {!!(project.clarificationQuestions || []).length && (
-        <Card className="no-print border-border-hairline bg-surface-1 p-5">
-          <div className="flex items-center justify-between border-b border-border-hairline pb-2">
-            <div>
-              <h2 className="text-sm font-semibold text-ink-primary font-display">Clarification Questions (Scope Resolver)</h2>
-              <p className="text-xs text-ink-muted">Answer these questions to remove assumptions and make your proposal watertight.</p>
-            </div>
+      {/* STEP: PRICE */}
+      <div id="step-price">
+        <StepHeader stepKey="price" count={2} />
+        {expandedSteps.has("price") && (
+          <div className="mt-2 space-y-6">
+            {/* SCOPE & ECONOMICS */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="flex items-center justify-between border-b border-border-hairline pb-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink-primary font-display">Scope & Economics (Pricing & Profit Engine)</h2>
+                  <p className="text-xs text-ink-muted">List project deliverables, hours, and rates to generate Baseline, Target, and Value pricing packages.</p>
+                </div>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {lines.map((line, i) => (
+                  <div key={i} className="grid grid-cols-12 gap-2 text-sm items-center">
+                    <Input
+                      placeholder="Deliverable name (e.g. Checkout Redesign)"
+                      value={line.name}
+                      onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, name: e.target.value } : l)))}
+                      className="col-span-5"
+                    />
+                    <Input
+                      type="number"
+                      placeholder="Qty"
+                      value={line.qty}
+                      onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, qty: Number(e.target.value) } : l)))}
+                      className="col-span-1 font-mono tabular-nums text-xs"
+                    />
+                    <Input
+                      type="number"
+                      placeholder="Hours"
+                      value={line.hours}
+                      onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, hours: Number(e.target.value) } : l)))}
+                      className="col-span-2 font-mono tabular-nums text-xs"
+                    />
+                    <Input
+                      type="number"
+                      placeholder="Cost rate ($)"
+                      value={line.costRate}
+                      onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, costRate: Number(e.target.value) } : l)))}
+                      className="col-span-1 font-mono tabular-nums text-xs"
+                    />
+                    <Input
+                      type="number"
+                      placeholder="Sell rate ($)"
+                      value={line.sellRate}
+                      onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, sellRate: Number(e.target.value) } : l)))}
+                      className="col-span-2 font-mono tabular-nums text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))}
+                      className="col-span-1 p-2 text-status-danger hover:bg-status-danger/10 rounded-[4px] text-center font-bold text-sm transition-colors"
+                      title="Remove deliverable"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-4 flex gap-2">
+                <Button variant="secondary" onClick={() => setLines((ls) => [...ls, { name: "", role: "", qty: 1, hours: 0, costRate: 0, sellRate: 0 }])}>
+                  + Add Deliverable
+                </Button>
+                <Button disabled={busy === `/api/projects/${id}/scope-economics`} onClick={calculateEconomics}>
+                  Calculate Packages
+                </Button>
+              </div>
+
+              {!!scenarios.length && (
+                <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {scenarios.map((s) => (
+                    <div key={s.name} className="rounded-[4px] border border-border-hairline bg-surface-2 p-4 text-sm">
+                      <p className="font-semibold text-ink-primary">{s.name}</p>
+                      <p className="mt-2 text-xl font-bold font-mono tabular-nums text-accent">${s.price.toLocaleString()}</p>
+                      <p className="mt-1 text-xs text-ink-muted font-mono tabular-nums">{s.hours} hours · {s.marginPct}% profit margin</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+
+            {/* OPPORTUNITY LAB */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink-primary font-display">Opportunity Lab (Commercial Intelligence)</h2>
+                  <p className="text-xs text-ink-muted">AI scope diagnosis: unpriced work, margin firewall, and feasibility checks.</p>
+                </div>
+                <Button variant="secondary" disabled={busy === `/api/projects/${id}/commercial-lab`} onClick={runCommercialLab}>
+                  Recalculate
+                </Button>
+              </div>
+              <div className="mt-4">
+                <Label>New client request / scope change (optional)</Label>
+                <Textarea rows={2} value={changeRequest} onChange={(e) => setChangeRequest(e.target.value)} />
+              </div>
+              {!!labResult && (
+                <pre className="mt-3 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 font-mono text-xs text-ink-secondary">
+                  {JSON.stringify(labResult, null, 2)}
+                </pre>
+              )}
+            </Card>
           </div>
-          <div className="mt-3 space-y-3">
-            {(project.clarificationQuestions || []).map((q, i) => (
-              <div key={i} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3.5">
-                <Label>{q}</Label>
-                <Input
-                  placeholder="Type answer or confirmed detail..."
-                  value={answers[i] || ""}
-                  onChange={(e) => setAnswers((a) => a.map((v, idx) => (idx === i ? e.target.value : v)))}
-                  className="mt-1"
+        )}
+      </div>
+
+      {/* STEP: PROPOSE */}
+      <div id="step-propose">
+        <StepHeader stepKey="propose" count={3} />
+
+        {/* PROPOSAL PRESENTATION & EDITOR — always visible, not collapsible */}
+        <div className="mt-2">
+          <Card className="border-border-hairline bg-surface-1 p-5 print:border-none print:p-0 print:shadow-none">
+            <div ref={editorCardRef} className="flex flex-wrap items-center justify-between gap-2 border-b border-border-hairline pb-3 no-print">
+              <div className="flex items-center gap-2">
+                <h2 className="text-base font-semibold text-ink-primary font-display">Client Proposal Document</h2>
+                <Badge tone="neutral">{parsedSections.length} Sections</Badge>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <div className="inline-flex rounded-[4px] border border-border-hairline p-0.5 bg-surface-2">
+                  <button
+                    onClick={() => setViewMode("preview")}
+                    className={`rounded-[2px] px-3 py-1 text-xs font-medium transition-colors ${
+                      viewMode === "preview" ? "bg-surface-3 text-ink-primary shadow-sm" : "text-ink-muted hover:text-ink-primary"
+                    }`}
+                  >
+                    Executive Document View
+                  </button>
+                  <button
+                    onClick={() => setViewMode("edit")}
+                    className={`rounded-[2px] px-3 py-1 text-xs font-medium transition-colors ${
+                      viewMode === "edit" ? "bg-surface-3 text-ink-primary shadow-sm" : "text-ink-muted hover:text-ink-primary"
+                    }`}
+                  >
+                    Edit Text
+                  </button>
+                </div>
+
+                <Button variant="ghost" onClick={handleCopy} className="text-xs py-1 px-2.5">
+                  {copied ? "Copied ✓" : "Copy"}
+                </Button>
+              </div>
+            </div>
+
+            {/* FORMATTED EXECUTIVE PREVIEW MODE */}
+            {viewMode === "preview" ? (
+              <div className="mt-4 space-y-6">
+                {project.proposalOptions?.includeSellerLogo && sellerLogoPath && (
+                  <img src={sellerLogoPath} alt="" className="max-h-12" />
+                )}
+                {/* Document Header for Print / View */}
+                <div className="border-b border-border-hairline pb-4 print:border-black">
+                  <h2 className="text-xl font-display font-medium tracking-tight text-ink-primary print:text-black">
+                    {project.clientLabel || "Client Proposal"}
+                  </h2>
+                  <div className="mt-1 flex flex-wrap gap-4 text-xs font-mono tabular-nums text-ink-muted print:text-black">
+                    {project.budget && <span>Budget: <strong className="text-ink-primary print:text-black">{project.budget}</strong></span>}
+                    {project.timeline && <span>Timeline: <strong className="text-ink-primary print:text-black">{project.timeline}</strong></span>}
+                    <span>Prepared by: <strong className="text-ink-primary print:text-black">ScopeVanta</strong></span>
+                  </div>
+                </div>
+
+                {/* Render Parsed Sections */}
+                {parsedSections.map((sec, idx) => (
+                  <div key={idx} className="proposal-document-section space-y-2.5 rounded-[4px] border border-border-hairline bg-surface-2 p-4 print:border-none print:p-0">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-accent print:text-black font-mono">
+                      {sec.title}
+                    </h3>
+                    <div className="space-y-1.5 text-xs leading-relaxed text-ink-secondary print:text-black font-body">
+                      {sec.lines.map((line, lIdx) => {
+                        const trimmed = line.trim();
+                        if (!trimmed) return <div key={lIdx} className="h-1.5" />;
+                        const isBullet = trimmed.startsWith("-") || trimmed.startsWith("*") || trimmed.startsWith("•");
+                        if (isBullet) {
+                          const content = trimmed.replace(/^[-*•]\s*/, "");
+                          return (
+                            <div key={lIdx} className="flex items-start gap-2 pl-2">
+                              <span className="text-accent mt-0.5 print:text-black">•</span>
+                              <span>{content}</span>
+                            </div>
+                          );
+                        }
+                        return <p key={lIdx}>{line}</p>;
+                      })}
+                    </div>
+                  </div>
+                ))}
+
+                {/* Scope Visuals if generated */}
+                {project.visuals && project.visuals.length > 0 && (
+                  <div className="no-print rounded-[4px] border border-border-hairline bg-surface-2 p-4">
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-accent mb-3 font-mono">
+                      Project Visuals & Analytics
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {project.visuals.map((vis, vIdx) => (
+                        <div key={vIdx} className="rounded-[4px] border border-border-hairline bg-surface-1 p-3.5">
+                          <p className="text-xs font-semibold text-ink-primary mb-2">{vis.title}</p>
+                          <div className="space-y-2">
+                            {vis.labels.map((label, lIdx) => {
+                              const val = vis.values[lIdx] ?? 0;
+                              const max = Math.max(...vis.values, 1);
+                              const pct = Math.round((val / max) * 100);
+                              return (
+                                <div key={lIdx} className="space-y-1">
+                                  <div className="flex justify-between text-[11px] font-mono tabular-nums text-ink-muted">
+                                    <span>{label}</span>
+                                    <span>{val}</span>
+                                  </div>
+                                  <div className="h-1.5 w-full rounded-full bg-surface-3 overflow-hidden">
+                                    <div className="h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* RAW TEXTAREA EDIT MODE */
+              <div className="mt-4">
+                <Textarea
+                  rows={20}
+                  className="font-mono text-xs leading-relaxed"
+                  value={proposalDraft}
+                  onChange={(e) => setProposalDraft(e.target.value)}
+                />
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-xs font-mono tabular-nums text-ink-muted">
+                    {proposalDraft.split(/\s+/).filter(Boolean).length} words · {proposalDraft.length} characters
+                  </span>
+                  <Button disabled={busy === `/api/projects/${id}/proposal`} onClick={saveProposal}>
+                    Save proposal
+                  </Button>
+                </div>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        {expandedSteps.has("propose") && (
+          <div className="mt-6 space-y-6">
+            {/* PROPOSAL STUDIO */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="border-b border-border-hairline pb-2">
+                <h2 className="text-sm font-semibold text-ink-primary font-display">Proposal Studio</h2>
+                <p className="text-xs text-ink-muted">Audit, structure, and adapt the proposal itself.</p>
+              </div>
+
+              <div className="mt-4 flex gap-2">
+                <Select value={studioAction} onChange={(e) => setStudioAction(e.target.value)} className="w-56 text-xs">
+                  {STUDIO_ACTIONS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                </Select>
+                <Button disabled={busy === `/api/projects/${id}/proposal-studio`} onClick={runProposalStudio}>
+                  Run Proposal Studio
+                </Button>
+              </div>
+              <div className="mt-3">
+                <Label>Meeting notes, objection, or context (used by Meeting Update, Objection Workspace, and Follow-up Draft)</Label>
+                <Textarea rows={3} value={studioInput} onChange={(e) => setStudioInput(e.target.value)} />
+              </div>
+
+              {!studio && (
+                <p className="mt-4 text-xs text-ink-muted">Pick an action above and run Proposal Studio to audit, restructure, or adapt this proposal.</p>
+              )}
+
+              {!!studio && studioShape === "audit" && (
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Badge tone={studio.ready ? "success" : "warning"}>{studio.ready ? "Ready to send" : "Not ready yet"}</Badge>
+                    <span className="font-mono text-lg text-ink-primary">{studio.score}</span>
+                  </div>
+                  {!!studio.issues?.length && (
+                    <div className="space-y-2.5">
+                      {studio.issues.map((iss: { severity: string; type: string; issue: string; fix: string }, i: number) => (
+                        <div key={i} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3">
+                          <div className="flex items-center gap-2">
+                            <Badge tone={iss.severity === "High" ? "danger" : iss.severity === "Medium" ? "warning" : "neutral"}>{iss.severity}</Badge>
+                            <span className="text-xs font-medium text-ink-primary">{iss.type}</span>
+                          </div>
+                          <p className="mt-1.5 text-sm text-ink-primary">{iss.issue}</p>
+                          <p className="mt-1 text-xs text-ink-muted">{iss.fix}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {!!studio.strengths?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Strengths</h3>
+                      <ul className="mt-1.5 space-y-1.5 text-xs text-ink-secondary">
+                        {studio.strengths.map((v: string, i: number) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-accent mt-0.5">•</span>
+                            <span>{v}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!!studio && studioShape === "coverage" && (
+                <div className="mt-4 space-y-3">
+                  <div className="grid grid-cols-3 gap-2 text-xs font-mono tabular-nums">
+                    <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5 text-center">
+                      <span className="text-ink-muted block text-[11px]">Covered</span>
+                      <span className="font-semibold text-status-success">{studio.covered}</span>
+                    </div>
+                    <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5 text-center">
+                      <span className="text-ink-muted block text-[11px]">Ambiguous</span>
+                      <span className="font-semibold text-status-warning">{studio.ambiguous}</span>
+                    </div>
+                    <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5 text-center">
+                      <span className="text-ink-muted block text-[11px]">Unanswered</span>
+                      <span className="font-semibold text-status-danger">{studio.unanswered}</span>
+                    </div>
+                  </div>
+                  {!!studio.items?.length && (
+                    <div className="space-y-2.5">
+                      {studio.items.map((it: { requirement: string; status: string; section: string; gap: string }, i: number) => (
+                        <div key={i} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm text-ink-primary">{it.requirement}</span>
+                            <Badge tone={it.status === "Covered" ? "success" : it.status === "Ambiguous" ? "warning" : "danger"}>{it.status}</Badge>
+                          </div>
+                          <p className="mt-1 text-[11px] text-ink-muted font-mono">{it.section}</p>
+                          {!!it.gap && <p className="mt-1 text-xs text-ink-muted">{it.gap}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!!studio && studioShape === "sections" && (
+                <div className="mt-4 space-y-3">
+                  {studio.map((sec: { title: string; purpose: string; content: string }, i: number) => (
+                    <div key={i} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3.5">
+                      <p className="font-medium text-ink-primary text-sm">{sec.title}</p>
+                      <p className="mt-0.5 text-xs italic text-ink-muted">{sec.purpose}</p>
+                      <pre className="mt-2 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-1 p-3.5 font-mono text-xs text-ink-secondary">
+                        {sec.content}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!!studio && studioShape === "approaches" && (
+                <div className="mt-4 space-y-3">
+                  {studio.map((ap: { name: string; positioning: string; bestWhen: string }, i: number) => (
+                    <div key={i} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3.5">
+                      <p className="font-medium text-ink-primary text-sm">{ap.name}</p>
+                      <p className="mt-1 text-sm text-ink-secondary">{ap.positioning}</p>
+                      <p className="mt-1.5 text-xs text-ink-muted"><span className="font-medium text-ink-secondary">Best when: </span>{ap.bestWhen}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!!studio && studioShape === "meeting" && (
+                <div className="mt-4 space-y-4">
+                  {[
+                    { key: "newRequirements", label: "New Requirements" },
+                    { key: "changedRequirements", label: "Changed Requirements" },
+                    { key: "buyerSignals", label: "Buyer Signals" },
+                    { key: "objections", label: "Objections" },
+                    { key: "openQuestions", label: "Open Questions" },
+                    { key: "recommendedUpdates", label: "Recommended Updates" },
+                  ].map(({ key, label }) => {
+                    const items: string[] = studio[key] || [];
+                    if (!items.length) return null;
+                    return (
+                      <div key={key} className="border-t border-border-hairline/60 pt-3 first:border-0 first:pt-0">
+                        <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">{label}</h3>
+                        <ul className="mt-1.5 space-y-1.5 text-xs text-ink-secondary">
+                          {items.map((v, i) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className="text-accent mt-0.5">•</span>
+                              <span>{v}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {!!studio && studioShape === "objection" && (
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <p className="text-sm font-medium text-ink-primary font-body">{studio.objection}</p>
+                    <p className="mt-1 text-xs text-ink-muted">{studio.diagnosis}</p>
+                  </div>
+                  {!!studio.protect?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Protect</h3>
+                      <ul className="mt-1.5 space-y-1.5 text-xs text-ink-secondary">
+                        {studio.protect.map((v: string, i: number) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-accent mt-0.5">•</span>
+                            <span>{v}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {!!studio.options?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3 space-y-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Response Options</h3>
+                      {studio.options.map((opt: { approach: string; commercialTradeoff: string; response: string }, i: number) => (
+                        <div key={i} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3">
+                          <p className="text-sm font-medium text-ink-primary">{opt.approach}</p>
+                          <p className="mt-1 text-xs text-ink-muted">{opt.commercialTradeoff}</p>
+                          <p className="mt-1.5 text-sm text-ink-secondary">{opt.response}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!!studio && studioShape === "followUp" && (
+                <div className="mt-4 space-y-3">
+                  <Badge tone="neutral">{studio.stage}</Badge>
+                  <p className="text-sm font-bold text-ink-primary">{studio.subject}</p>
+                  <div className="flex items-start gap-2">
+                    <pre className="flex-1 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 font-mono text-xs text-ink-secondary">
+                      {studio.body}
+                    </pre>
+                    <Button variant="ghost" onClick={handleCopyStudioFollowUp} className="text-xs py-1 px-2.5 shrink-0">
+                      {copiedStudioFollowUp ? "Copied ✓" : "Copy"}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-ink-muted border-t border-border-hairline/60 pt-3">{studio.nextStep}</p>
+                </div>
+              )}
+
+              {!!studio && studioShape === "unknown" && (
+                <pre className="mt-4 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 font-mono text-xs text-ink-secondary">
+                  {JSON.stringify(studio, null, 2)}
+                </pre>
+              )}
+            </Card>
+
+            {/* CLIENT DEAL ROOM */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="border-b border-border-hairline pb-2">
+                <h2 className="text-sm font-semibold text-ink-primary font-display">Client Deal Room (Shareable Client Portal)</h2>
+                <p className="text-xs text-ink-muted">A private, secure web link for your client to review the proposal and select packages online.</p>
+              </div>
+              {project.shareToken ? (
+                <div className="mt-4 space-y-3 text-sm">
+                  <p className="text-xs text-ink-muted font-mono tabular-nums">
+                    Share link active · {shareAnalytics && `${shareAnalytics.views} views${shareAnalytics.selectedScenario ? ` · package selected: ${shareAnalytics.selectedScenario}` : ""}`}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a
+                      href={`/share/${project.shareToken}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-accent hover:underline text-xs font-mono break-all inline-flex items-center gap-1.5 bg-surface-2 px-3 py-2 rounded-[4px] border border-border-hairline"
+                    >
+                      <span>{typeof window !== "undefined" ? `${window.location.origin}/share/${project.shareToken}` : `/share/${project.shareToken}`}</span>
+                      <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                    </a>
+                    <Button
+                      variant="secondary"
+                      className="text-xs py-1.5 px-3 shrink-0"
+                      onClick={() => {
+                        if (typeof window !== "undefined") {
+                          navigator.clipboard.writeText(`${window.location.origin}/share/${project.shareToken}`);
+                        }
+                      }}
+                    >
+                      Copy Link
+                    </Button>
+                  </div>
+                  <div>
+                    <Button variant="danger" onClick={revokeShare} className="text-xs py-1 px-3">Revoke Link</Button>
+                  </div>
+                </div>
+              ) : (
+                <Button className="mt-4" disabled={busy === `/api/projects/${id}/share`} onClick={createShare}>
+                  Generate Client Review Link
+                </Button>
+              )}
+            </Card>
+          </div>
+        )}
+      </div>
+
+      {/* STEP: WIN */}
+      <div id="step-win">
+        <StepHeader stepKey="win" count={3} />
+        {expandedSteps.has("win") && (
+          <div className="mt-2 space-y-6">
+            {/* DEAL OS */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="border-b border-border-hairline pb-2">
+                <h2 className="text-sm font-semibold text-ink-primary font-display">Deal-to-Profit OS (Deal Strategy Assistant)</h2>
+                <p className="text-xs text-ink-muted">14 tactical commercial actions: objection handling, negotiation leverage, scope change firewall, and premortem.</p>
+              </div>
+              <div className="mt-4 flex gap-2">
+                <Select value={dealOSAction} onChange={(e) => setDealOSAction(e.target.value)} className="w-48 text-xs">
+                  {DEAL_OS_ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
+                </Select>
+                <Input placeholder="Optional input (client objection, meeting notes, change request…)" value={dealOSInput} onChange={(e) => setDealOSInput(e.target.value)} />
+                <Button disabled={busy === `/api/projects/${id}/deal-os`} onClick={runDealOS}>Run</Button>
+              </div>
+              {!!dealOSResult && (
+                <pre className="mt-3 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 font-mono text-xs text-ink-secondary">
+                  {JSON.stringify(dealOSResult, null, 2)}
+                </pre>
+              )}
+            </Card>
+
+            {/* WIN PLAN */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="border-b border-border-hairline pb-2">
+                <h2 className="text-sm font-semibold text-ink-primary font-display">Win Plan</h2>
+                <p className="text-xs text-ink-muted">Strategy to move this specific opportunity toward a decision.</p>
+              </div>
+
+              <div className="mt-4">
+                <Button
+                  variant={project.data?.winPlan ? "secondary" : "primary"}
+                  disabled={busy === `/api/projects/${id}/win-plan`}
+                  onClick={buildWinPlan}
+                >
+                  {project.data?.winPlan ? "Refresh Win Plan" : "Build Win Plan"}
+                </Button>
+              </div>
+
+              {project.data?.winPlan ? (
+                <div className="mt-4 space-y-4">
+                  {!!(project.data.winPlan as { buyerPriorities?: string[] }).buyerPriorities?.length && (
+                    <div>
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Buyer Priorities</h3>
+                      <ul className="mt-1.5 space-y-1.5 text-xs text-ink-secondary">
+                        {(project.data.winPlan as { buyerPriorities?: string[] }).buyerPriorities!.map((v, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-accent mt-0.5">•</span>
+                            <span>{v}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {!!(project.data.winPlan as { decisionFriction?: string[] }).decisionFriction?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Decision Friction</h3>
+                      <ul className="mt-1.5 space-y-1.5 text-xs text-ink-secondary">
+                        {(project.data.winPlan as { decisionFriction?: string[] }).decisionFriction!.map((v, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-accent mt-0.5">•</span>
+                            <span>{v}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {!!(project.data.winPlan as { decisionMakers?: string[] }).decisionMakers?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Decision Makers</h3>
+                      <ul className="mt-1.5 space-y-1.5 text-xs text-ink-secondary">
+                        {(project.data.winPlan as { decisionMakers?: string[] }).decisionMakers!.map((v, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-accent mt-0.5">•</span>
+                            <span>{v}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {!!(project.data.winPlan as { dealSignals?: string[] }).dealSignals?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Deal Signals</h3>
+                      <ul className="mt-1.5 space-y-1.5 text-xs text-ink-secondary">
+                        {(project.data.winPlan as { dealSignals?: string[] }).dealSignals!.map((v, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-accent mt-0.5">•</span>
+                            <span>{v}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {!!(project.data.winPlan as { objections?: Array<{ objection: string; response: string }> }).objections?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Objections & Responses</h3>
+                      <div className="mt-1.5 space-y-3">
+                        {(project.data.winPlan as { objections?: Array<{ objection: string; response: string }> }).objections!.map((o, i) => (
+                          <div key={i}>
+                            <p className="text-xs font-medium text-ink-primary">{o.objection}</p>
+                            <p className="mt-0.5 text-sm text-ink-muted">{o.response}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!!(project.data.winPlan as { differentiators?: string[] }).differentiators?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Differentiators</h3>
+                      <ul className="mt-1.5 space-y-1.5 text-xs text-ink-secondary">
+                        {(project.data.winPlan as { differentiators?: string[] }).differentiators!.map((v, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-accent mt-0.5">•</span>
+                            <span>{v}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {!!(project.data.winPlan as { nextActions?: string[] }).nextActions?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Next Actions</h3>
+                      <ol className="mt-1.5 space-y-1.5 text-xs text-ink-secondary list-decimal list-inside">
+                        {(project.data.winPlan as { nextActions?: string[] }).nextActions!.map((v, i) => (
+                          <li key={i}>{v}</li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
+
+                  <div className="border-t border-border-hairline/60 pt-3">
+                    <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Suggested Follow-up</h3>
+                    <div className="mt-2 flex items-start gap-2">
+                      <pre className="flex-1 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 font-mono text-xs text-ink-secondary">
+                        {(project.data.winPlan as { followUp?: string }).followUp}
+                      </pre>
+                      <Button variant="ghost" onClick={handleCopyWinPlanFollowUp} className="text-xs py-1 px-2.5 shrink-0">
+                        {copiedWinPlanFollowUp ? "Copied ✓" : "Copy"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {!!project.data.winPlanUpdatedAt && (
+                    <p className="text-[11px] text-ink-muted font-mono tabular-nums">
+                      Updated {new Date(String(project.data.winPlanUpdatedAt)).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-4 text-xs text-ink-muted">Build a win plan to surface buyer priorities, likely objections with responses, and a ranked list of next actions.</p>
+              )}
+            </Card>
+
+            {/* CLOSE COACH */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="border-b border-border-hairline pb-2">
+                <h2 className="text-sm font-semibold text-ink-primary font-display">Close Coach</h2>
+                <p className="text-xs text-ink-muted">The highest-leverage next action for where this deal stands right now.</p>
+              </div>
+
+              <div className="mt-4">
+                <Button
+                  variant={project.data?.closeCoach ? "secondary" : "primary"}
+                  disabled={busy === `/api/projects/${id}/close-coach`}
+                  onClick={getClosingGuidance}
+                >
+                  {project.data?.closeCoach ? "Refresh Closing Guidance" : "Get Closing Guidance"}
+                </Button>
+              </div>
+
+              {!!project.data?.closeCoach && (
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <p className="text-sm font-medium text-ink-primary font-body">
+                      {(project.data.closeCoach as { nextBestAction?: string }).nextBestAction}
+                    </p>
+                    <p className="mt-1 text-xs text-ink-muted">
+                      {(project.data.closeCoach as { why?: string }).why}
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xs font-semibold text-ink-primary uppercase tracking-wider font-mono">Suggested follow-up</h3>
+                    <div className="mt-2 flex items-start gap-2">
+                      <pre className="flex-1 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 font-mono text-xs text-ink-secondary">
+                        {(project.data.closeCoach as { followUp?: string }).followUp}
+                      </pre>
+                      <Button variant="ghost" onClick={handleCopyFollowUp} className="text-xs py-1 px-2.5 shrink-0">
+                        {copiedFollowUp ? "Copied ✓" : "Copy"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {!!(project.data.closeCoach as { discoveryQuestions?: string[] }).discoveryQuestions?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-xs font-semibold text-ink-primary uppercase tracking-wider font-mono">Discovery questions</h3>
+                      <ul className="mt-2 space-y-1.5 text-xs text-ink-secondary">
+                        {(project.data.closeCoach as { discoveryQuestions?: string[] }).discoveryQuestions!.map((q, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-accent mt-0.5">•</span>
+                            <span>{q}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {!!(project.data.closeCoach as { risk?: string }).risk && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <Badge tone="warning">Closing Risk</Badge>
+                      <p className="mt-1 text-sm text-ink-primary">{(project.data.closeCoach as { risk?: string }).risk}</p>
+                    </div>
+                  )}
+
+                  {!!(project.data.closeCoach as { generatedAt?: string }).generatedAt && (
+                    <p className="text-[11px] text-ink-muted font-mono tabular-nums">
+                      Generated {new Date((project.data.closeCoach as { generatedAt?: string }).generatedAt!).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
+      </div>
+
+      {/* STEP: PROTECT */}
+      <div id="step-protect">
+        <StepHeader stepKey="protect" count={4} />
+        {expandedSteps.has("protect") && (
+          <div className="mt-2 space-y-6">
+            {/* SCOPE BASELINE & CHANGE ORDERS */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="border-b border-border-hairline pb-2">
+                <h2 className="text-sm font-semibold text-ink-primary font-display">Scope Baseline & Change Orders</h2>
+                <p className="text-xs text-ink-muted">Lock in the agreed scope, then track and approve requests that fall outside it.</p>
+              </div>
+
+              <div className="mt-4">
+                <h3 className="text-xs font-semibold text-ink-primary uppercase tracking-wider font-mono">Baseline</h3>
+                {project.data?.scopeBaseline ? (
+                  <p className="mt-2 text-xs text-ink-muted font-mono tabular-nums">
+                    Baseline v{(project.data.scopeBaseline as { version?: number }).version} · established from proposal v
+                    {(project.data.scopeBaseline as { proposalVersion?: number }).proposalVersion} ·{" "}
+                    {new Date((project.data.scopeBaseline as { createdAt?: string }).createdAt || "").toLocaleDateString()}
+                  </p>
+                ) : (
+                  <p className="mt-2 text-xs text-ink-muted">No baseline established yet.</p>
+                )}
+                <Button
+                  variant={project.data?.scopeBaseline ? "secondary" : "primary"}
+                  className="mt-3"
+                  disabled={busy === `/api/projects/${id}/scope-baseline`}
+                  onClick={establishBaseline}
+                >
+                  {project.data?.scopeBaseline ? "Re-establish Baseline" : "Establish Baseline"}
+                </Button>
+              </div>
+
+              <div className="mt-5 border-t border-border-hairline/60 pt-4">
+                <h3 className="text-xs font-semibold text-ink-primary uppercase tracking-wider font-mono">Change Order</h3>
+                {!!String(project.data?.changeOrderDraft || "") ? (
+                  <>
+                    <div className="mt-2 flex items-center gap-2">
+                      {project.data?.changeOrderStatus === "draft" && <Badge tone="warning">Draft — pending approval</Badge>}
+                      {project.data?.changeOrderStatus === "approved" && <Badge tone="success">Approved</Badge>}
+                    </div>
+                    <div className="mt-2 flex items-start gap-2">
+                      <pre className="flex-1 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 font-mono text-xs text-ink-secondary">
+                        {String(project.data?.changeOrderDraft || "")}
+                      </pre>
+                      <Button variant="ghost" onClick={handleCopyChangeOrder} className="text-xs py-1 px-2.5 shrink-0">
+                        {copiedChangeOrder ? "Copied ✓" : "Copy"}
+                      </Button>
+                    </div>
+                    <Button
+                      variant="primary"
+                      className="mt-3"
+                      disabled={project.data?.changeOrderStatus !== "draft" || busy === `/api/projects/${id}/change-order/approve`}
+                      onClick={approveChangeOrder}
+                    >
+                      Approve Change Order
+                    </Button>
+                  </>
+                ) : (
+                  <p className="mt-2 text-xs text-ink-muted">Enter a client request in Commercial Lab above and run it to check for out-of-scope changes.</p>
+                )}
+              </div>
+
+              <div className="mt-5 border-t border-border-hairline/60 pt-4">
+                <h3 className="text-xs font-semibold text-ink-primary uppercase tracking-wider font-mono">History</h3>
+                <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2 text-sm">
+                    <p className="text-[11px] text-ink-muted font-mono uppercase tracking-wider">Baselines</p>
+                    {history.baselines.map((b) => (
+                      <div key={b.id} className="flex justify-between items-center border-b border-border-hairline/40 pb-2">
+                        <span className="text-ink-secondary text-xs font-mono">v{b.snapshot?.version ?? "—"}</span>
+                        <Badge tone="neutral">{new Date(b.createdAt).toLocaleDateString()}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <p className="text-[11px] text-ink-muted font-mono uppercase tracking-wider">Change Orders</p>
+                    {history.changeOrders.map((c) => (
+                      <div key={c.id} className="flex justify-between items-center border-b border-border-hairline/40 pb-2">
+                        <span className="text-ink-secondary text-xs font-mono">{new Date(c.createdAt).toLocaleDateString()}</span>
+                        <Badge tone={c.status === "APPROVED" ? "success" : "warning"}>{c.status}</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </Card>
+
+            {/* DELIVERY & ACTUALS */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="border-b border-border-hairline pb-2">
+                <h2 className="text-sm font-semibold text-ink-primary font-display">Delivery & Actuals</h2>
+                <p className="text-xs text-ink-muted">Record real hours, cost and revenue once work starts or completes — feeds Pricing Brain and Commercial Autopilot.</p>
+              </div>
+              <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <Label>Actual revenue ($)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={actualRevenue}
+                    onChange={(e) => setActualRevenue(Number(e.target.value))}
+                    className="font-mono tabular-nums text-xs"
+                  />
+                </div>
+                <div>
+                  <Label>Actual cost ($)</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={actualCost}
+                    onChange={(e) => setActualCost(Number(e.target.value))}
+                    className="font-mono tabular-nums text-xs"
+                  />
+                </div>
+                <div>
+                  <Label>Actual hours</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    value={actualHours}
+                    onChange={(e) => setActualHours(Number(e.target.value))}
+                    className="font-mono tabular-nums text-xs"
+                  />
+                </div>
+              </div>
+              <div className="mt-3">
+                <Label>Latest client request / delivery note</Label>
+                <Textarea
+                  rows={3}
+                  maxLength={10000}
+                  value={clientRequestInbox}
+                  onChange={(e) => setClientRequestInbox(e.target.value)}
                 />
               </div>
-            ))}
-          </div>
-          <Button className="mt-4" disabled={busy === `/api/projects/${id}/refine`} onClick={refine}>
-            Refine & Regenerate Proposal
-          </Button>
-        </Card>
-      )}
-
-      {/* SCOPE & ECONOMICS */}
-      <Card className="no-print border-border-hairline bg-surface-1 p-5">
-        <div className="flex items-center justify-between border-b border-border-hairline pb-2">
-          <div>
-            <h2 className="text-sm font-semibold text-ink-primary font-display">Scope & Economics (Pricing & Profit Engine)</h2>
-            <p className="text-xs text-ink-muted">List project deliverables, hours, and rates to generate Baseline, Target, and Value pricing packages.</p>
-          </div>
-        </div>
-
-        <div className="mt-4 space-y-2">
-          {lines.map((line, i) => (
-            <div key={i} className="grid grid-cols-12 gap-2 text-sm items-center">
-              <Input
-                placeholder="Deliverable name (e.g. Checkout Redesign)"
-                value={line.name}
-                onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, name: e.target.value } : l)))}
-                className="col-span-5"
-              />
-              <Input
-                type="number"
-                placeholder="Qty"
-                value={line.qty}
-                onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, qty: Number(e.target.value) } : l)))}
-                className="col-span-1 font-mono tabular-nums text-xs"
-              />
-              <Input
-                type="number"
-                placeholder="Hours"
-                value={line.hours}
-                onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, hours: Number(e.target.value) } : l)))}
-                className="col-span-2 font-mono tabular-nums text-xs"
-              />
-              <Input
-                type="number"
-                placeholder="Cost rate ($)"
-                value={line.costRate}
-                onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, costRate: Number(e.target.value) } : l)))}
-                className="col-span-1 font-mono tabular-nums text-xs"
-              />
-              <Input
-                type="number"
-                placeholder="Sell rate ($)"
-                value={line.sellRate}
-                onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, sellRate: Number(e.target.value) } : l)))}
-                className="col-span-2 font-mono tabular-nums text-xs"
-              />
-              <button
-                type="button"
-                onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))}
-                className="col-span-1 p-2 text-status-danger hover:bg-status-danger/10 rounded-[4px] text-center font-bold text-sm transition-colors"
-                title="Remove deliverable"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-4 flex gap-2">
-          <Button variant="secondary" onClick={() => setLines((ls) => [...ls, { name: "", role: "", qty: 1, hours: 0, costRate: 0, sellRate: 0 }])}>
-            + Add Deliverable
-          </Button>
-          <Button disabled={busy === `/api/projects/${id}/scope-economics`} onClick={calculateEconomics}>
-            Calculate Packages
-          </Button>
-        </div>
-
-        {!!scenarios.length && (
-          <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {scenarios.map((s) => (
-              <div key={s.name} className="rounded-[4px] border border-border-hairline bg-surface-2 p-4 text-sm">
-                <p className="font-semibold text-ink-primary">{s.name}</p>
-                <p className="mt-2 text-xl font-bold font-mono tabular-nums text-accent">${s.price.toLocaleString()}</p>
-                <p className="mt-1 text-xs text-ink-muted font-mono tabular-nums">{s.hours} hours · {s.marginPct}% profit margin</p>
+              {(actualHours > 0 || actualRevenue > 0) && (
+                <div className="mt-3">
+                  <Badge tone={((project.data?.actualMarginPct as number) ?? 0) >= 20 ? "success" : ((project.data?.actualMarginPct as number) ?? 0) >= 0 ? "warning" : "danger"}>
+                    {(project.data?.actualMarginPct as number) ?? 0}% actual margin
+                  </Badge>
+                </div>
+              )}
+              <div className="mt-4">
+                <Button variant="primary" disabled={busy === `/api/projects/${id}/commercial-state`} onClick={saveActuals}>
+                  Save Actuals
+                </Button>
               </div>
-            ))}
+            </Card>
+
+            {/* COMMERCIAL AUTOPILOT */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <div className="border-b border-border-hairline pb-2">
+                <h2 className="text-sm font-semibold text-ink-primary font-display">Commercial Autopilot</h2>
+                <p className="text-xs text-ink-muted">Prioritized next actions, estimate calibration, and profitability, drawn from this deal's own history.</p>
+              </div>
+
+              <div className="mt-4">
+                <Button
+                  variant={autopilot ? "secondary" : "primary"}
+                  disabled={busy === `/api/projects/${id}/commercial-autopilot`}
+                  onClick={runAutopilot}
+                >
+                  {autopilot ? "Refresh Autopilot" : "Run Autopilot"}
+                </Button>
+              </div>
+
+              {!autopilot && (
+                <p className="mt-4 text-xs text-ink-muted">Run Commercial Autopilot for prioritized actions, estimate calibration, and a profitability snapshot based on this deal's actual data.</p>
+              )}
+
+              {!!autopilot && (
+                <div className="mt-4 space-y-4">
+                  {!!autopilot.autopilot?.actions?.length && (
+                    <div>
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Prioritized Actions</h3>
+                      <div className="mt-1.5 space-y-2.5">
+                        {[...autopilot.autopilot.actions]
+                          .sort((a: { priority: number }, b: { priority: number }) => a.priority - b.priority)
+                          .map((a: { priority: number; action: string; why: string; evidence: string; module: string }, i: number) => (
+                            <div key={i} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs text-ink-muted">#{a.priority}</span>
+                                <span className="text-sm font-medium text-ink-primary">{a.action}</span>
+                                <Badge tone="neutral">{a.module}</Badge>
+                              </div>
+                              <p className="mt-1 text-sm text-ink-muted">{a.why}</p>
+                              <p className="mt-1 text-xs text-ink-disabled">{a.evidence}</p>
+                            </div>
+                          ))}
+                      </div>
+                      {!!autopilot.autopilot?.blockers?.length && (
+                        <ul className="mt-2.5 space-y-1.5 text-xs text-ink-secondary">
+                          {autopilot.autopilot.blockers.map((v: string, i: number) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className="text-accent mt-0.5">•</span>
+                              <span>{v}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {!!(autopilot.calibration?.estimatedVsActualSignals?.length || autopilot.calibration?.suggestedAdjustment) && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Estimate Calibration</h3>
+                      {!!autopilot.calibration?.estimatedVsActualSignals?.length && (
+                        <ul className="mt-1.5 space-y-1.5 text-xs text-ink-secondary">
+                          {autopilot.calibration.estimatedVsActualSignals.map((v: string, i: number) => (
+                            <li key={i} className="flex items-start gap-2">
+                              <span className="text-accent mt-0.5">•</span>
+                              <span>{v}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      {!!autopilot.calibration?.suggestedAdjustment && (
+                        <p className="mt-2 text-sm text-ink-primary">{autopilot.calibration.suggestedAdjustment}</p>
+                      )}
+                    </div>
+                  )}
+
+                  {!!(autopilot.redline?.baseline?.length || autopilot.redline?.requested?.length || autopilot.redline?.commercialImpact?.length) && (
+                    <div className="border-t border-border-hairline/60 pt-3 space-y-2.5">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Redline</h3>
+                      {!!autopilot.redline?.baseline?.length && (
+                        <div>
+                          <p className="text-xs font-medium text-ink-secondary">Baseline</p>
+                          <ul className="mt-1 space-y-1.5 text-xs text-ink-secondary">
+                            {autopilot.redline.baseline.map((v: string, i: number) => (
+                              <li key={i} className="flex items-start gap-2">
+                                <span className="text-accent mt-0.5">•</span>
+                                <span>{v}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {!!autopilot.redline?.requested?.length && (
+                        <div>
+                          <p className="text-xs font-medium text-ink-secondary">Requested</p>
+                          <ul className="mt-1 space-y-1.5 text-xs text-ink-secondary">
+                            {autopilot.redline.requested.map((v: string, i: number) => (
+                              <li key={i} className="flex items-start gap-2">
+                                <span className="text-accent mt-0.5">•</span>
+                                <span>{v}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {!!autopilot.redline?.commercialImpact?.length && (
+                        <div>
+                          <p className="text-xs font-medium text-ink-secondary">Commercial Impact</p>
+                          <ul className="mt-1 space-y-1.5 text-xs text-ink-secondary">
+                            {autopilot.redline.commercialImpact.map((v: string, i: number) => (
+                              <li key={i} className="flex items-start gap-2">
+                                <span className="text-accent mt-0.5">•</span>
+                                <span>{v}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!!autopilot.negotiationScenarios?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Negotiation Scenarios</h3>
+                      <div className="mt-1.5 space-y-2.5">
+                        {autopilot.negotiationScenarios.map((s: { name: string; price: number; scopeTrade: string; marginImpact: string }, i: number) => (
+                          <div key={i} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium text-ink-primary">{s.name}</span>
+                              <span className="font-mono text-sm text-ink-primary">${s.price.toLocaleString()}</span>
+                            </div>
+                            <p className="mt-1 text-sm text-ink-secondary">{s.scopeTrade}</p>
+                            <p className="mt-1 text-xs text-ink-muted">{s.marginImpact}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!!autopilot.handoff && (
+                    <div className="border-t border-border-hairline/60 pt-3 space-y-2.5">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Handoff</h3>
+                      <Badge tone="neutral">{autopilot.handoff.status}</Badge>
+                      {!!autopilot.handoff.agreedScope?.length && (
+                        <div>
+                          <p className="text-xs font-medium text-ink-secondary">Agreed Scope</p>
+                          <ul className="mt-1 space-y-1.5 text-xs text-ink-secondary">
+                            {autopilot.handoff.agreedScope.map((v: string, i: number) => (
+                              <li key={i} className="flex items-start gap-2">
+                                <span className="text-accent mt-0.5">•</span>
+                                <span>{v}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {!!autopilot.handoff.commercialTerms?.length && (
+                        <div>
+                          <p className="text-xs font-medium text-ink-secondary">Commercial Terms</p>
+                          <ul className="mt-1 space-y-1.5 text-xs text-ink-secondary">
+                            {autopilot.handoff.commercialTerms.map((v: string, i: number) => (
+                              <li key={i} className="flex items-start gap-2">
+                                <span className="text-accent mt-0.5">•</span>
+                                <span>{v}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {!!autopilot.handoff.openItems?.length && (
+                        <div>
+                          <p className="text-xs font-medium text-ink-secondary">Open Items</p>
+                          <ul className="mt-1 space-y-1.5 text-xs text-ink-secondary">
+                            {autopilot.handoff.openItems.map((v: string, i: number) => (
+                              <li key={i} className="flex items-start gap-2">
+                                <span className="text-accent mt-0.5">•</span>
+                                <span>{v}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!!autopilot.similarity?.length && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Similar Opportunities</h3>
+                      <div className="mt-1.5 space-y-2.5">
+                        {autopilot.similarity.map((s: { label: string; reason: string; estimatedVsActual: string }, i: number) => (
+                          <div key={i}>
+                            <p className="text-sm font-medium text-ink-primary">{s.label}</p>
+                            <p className="mt-0.5 text-sm text-ink-secondary">{s.reason}</p>
+                            <p className="mt-0.5 text-xs text-ink-muted">{s.estimatedVsActual}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {!!autopilot.profitability && (
+                    <div className="border-t border-border-hairline/60 pt-3">
+                      <h3 className="text-[11px] font-mono uppercase tracking-wider text-ink-muted">Profitability</h3>
+                      <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs font-mono tabular-nums">
+                        <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
+                          <span className="text-ink-muted block text-[11px]">Quoted Value</span>
+                          <span className="font-semibold text-ink-primary">${Number(autopilot.profitability.quotedValue || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
+                          <span className="text-ink-muted block text-[11px]">Estimated Cost</span>
+                          <span className="font-semibold text-ink-primary">${Number(autopilot.profitability.estimatedCost || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
+                          <span className="text-ink-muted block text-[11px]">Actual Cost</span>
+                          <span className="font-semibold text-ink-primary">${Number(autopilot.profitability.actualCost || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
+                          <span className="text-ink-muted block text-[11px]">Forecast Cost</span>
+                          <span className="font-semibold text-ink-primary">${Number(autopilot.profitability.forecastCost || 0).toLocaleString()}</span>
+                        </div>
+                        <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
+                          <span className="text-ink-muted block text-[11px]">Estimated Margin</span>
+                          <Badge tone={Number(autopilot.profitability.estimatedMarginPct || 0) >= 20 ? "success" : Number(autopilot.profitability.estimatedMarginPct || 0) >= 0 ? "warning" : "danger"}>
+                            {autopilot.profitability.estimatedMarginPct}%
+                          </Badge>
+                        </div>
+                        <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
+                          <span className="text-ink-muted block text-[11px]">Actual Margin</span>
+                          <Badge tone={Number(autopilot.profitability.actualMarginPct || 0) >= 20 ? "success" : Number(autopilot.profitability.actualMarginPct || 0) >= 0 ? "warning" : "danger"}>
+                            {autopilot.profitability.actualMarginPct}%
+                          </Badge>
+                        </div>
+                      </div>
+                      {!!autopilot.profitability.scopeAdded?.length && (
+                        <div className="mt-2.5">
+                          <p className="text-xs font-medium text-ink-secondary">Scope Added</p>
+                          <ul className="mt-1 space-y-1.5 text-xs text-ink-secondary">
+                            {autopilot.profitability.scopeAdded.map((v: string, i: number) => (
+                              <li key={i} className="flex items-start gap-2">
+                                <span className="text-accent mt-0.5">•</span>
+                                <span>{v}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {!!autopilot.profitability.changeOrders?.length && (
+                        <div className="mt-2.5">
+                          <p className="text-xs font-medium text-ink-secondary">Change Orders</p>
+                          <ul className="mt-1 space-y-1.5 text-xs text-ink-secondary">
+                            {autopilot.profitability.changeOrders.map((v: string, i: number) => (
+                              <li key={i} className="flex items-start gap-2">
+                                <span className="text-accent mt-0.5">•</span>
+                                <span>{v}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {!!project.data?.commercialAutopilotAt && (
+                    <p className="text-[11px] text-ink-muted font-mono tabular-nums">
+                      Updated {new Date(String(project.data.commercialAutopilotAt)).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+              )}
+            </Card>
+
+            {/* REVISION HISTORY */}
+            <Card className="no-print border-border-hairline bg-surface-1 p-5">
+              <h2 className="text-sm font-semibold text-ink-primary font-display">Revision History</h2>
+              <p className="mt-1 text-xs text-ink-muted">
+                Restoring a version loads it into the editor — click Save Proposal to keep it as a new version.
+              </p>
+              <div className="mt-3 space-y-2 text-sm">
+                {versions.map((v) => (
+                  <div key={v.version} className="flex justify-between items-center border-b border-border-hairline/40 pb-2">
+                    <span className="text-ink-secondary text-xs font-mono">Version {v.version} · {v.status}</span>
+                    <div className="flex items-center gap-2">
+                      <Badge tone="neutral">{new Date(v.savedAt).toLocaleDateString()}</Badge>
+                      {v.revisionSource !== "current" && (
+                        <Button variant="secondary" className="text-xs py-1 px-2.5" onClick={() => restoreVersion(v)}>
+                          {restoredVersion === v.version ? "Restored ✓" : "Restore"}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Card>
           </div>
         )}
-      </Card>
-
-      {/* OPPORTUNITY LAB */}
-      <Card className="no-print border-border-hairline bg-surface-1 p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-ink-primary font-display">Opportunity Lab (Commercial Intelligence)</h2>
-            <p className="text-xs text-ink-muted">AI scope diagnosis: unpriced work, margin firewall, and feasibility checks.</p>
-          </div>
-          <Button variant="secondary" disabled={busy === `/api/projects/${id}/commercial-lab`} onClick={runCommercialLab}>
-            Recalculate
-          </Button>
-        </div>
-        {!!labResult && (
-          <pre className="mt-3 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 font-mono text-xs text-ink-secondary">
-            {JSON.stringify(labResult, null, 2)}
-          </pre>
-        )}
-      </Card>
-
-      {/* DEAL OS */}
-      <Card className="no-print border-border-hairline bg-surface-1 p-5">
-        <div className="border-b border-border-hairline pb-2">
-          <h2 className="text-sm font-semibold text-ink-primary font-display">Deal-to-Profit OS (Deal Strategy Assistant)</h2>
-          <p className="text-xs text-ink-muted">14 tactical commercial actions: objection handling, negotiation leverage, scope change firewall, and premortem.</p>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <Select value={dealOSAction} onChange={(e) => setDealOSAction(e.target.value)} className="w-48 text-xs">
-            {DEAL_OS_ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
-          </Select>
-          <Input placeholder="Optional input (client objection, meeting notes, change request…)" value={dealOSInput} onChange={(e) => setDealOSInput(e.target.value)} />
-          <Button disabled={busy === `/api/projects/${id}/deal-os`} onClick={runDealOS}>Run</Button>
-        </div>
-        {!!dealOSResult && (
-          <pre className="mt-3 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 font-mono text-xs text-ink-secondary">
-            {JSON.stringify(dealOSResult, null, 2)}
-          </pre>
-        )}
-      </Card>
-
-      {/* CLIENT DEAL ROOM */}
-      <Card className="no-print border-border-hairline bg-surface-1 p-5">
-        <div className="border-b border-border-hairline pb-2">
-          <h2 className="text-sm font-semibold text-ink-primary font-display">Client Deal Room (Shareable Client Portal)</h2>
-          <p className="text-xs text-ink-muted">A private, secure web link for your client to review the proposal and select packages online.</p>
-        </div>
-        {project.shareToken ? (
-          <div className="mt-4 space-y-3 text-sm">
-            <p className="text-xs text-ink-muted font-mono tabular-nums">
-              Share link active · {shareAnalytics && `${shareAnalytics.views} views${shareAnalytics.selectedScenario ? ` · package selected: ${shareAnalytics.selectedScenario}` : ""}`}
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <a
-                href={`/share/${project.shareToken}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-accent hover:underline text-xs font-mono break-all inline-flex items-center gap-1.5 bg-surface-2 px-3 py-2 rounded-[4px] border border-border-hairline"
-              >
-                <span>{typeof window !== "undefined" ? `${window.location.origin}/share/${project.shareToken}` : `/share/${project.shareToken}`}</span>
-                <span className="material-symbols-outlined text-[14px]">open_in_new</span>
-              </a>
-              <Button
-                variant="secondary"
-                className="text-xs py-1.5 px-3 shrink-0"
-                onClick={() => {
-                  if (typeof window !== "undefined") {
-                    navigator.clipboard.writeText(`${window.location.origin}/share/${project.shareToken}`);
-                  }
-                }}
-              >
-                Copy Link
-              </Button>
-            </div>
-            <div>
-              <Button variant="danger" onClick={revokeShare} className="text-xs py-1 px-3">Revoke Link</Button>
-            </div>
-          </div>
-        ) : (
-          <Button className="mt-4" disabled={busy === `/api/projects/${id}/share`} onClick={createShare}>
-            Generate Client Review Link
-          </Button>
-        )}
-      </Card>
-
-      {/* REVISION HISTORY */}
-      <Card className="no-print border-border-hairline bg-surface-1 p-5">
-        <h2 className="text-sm font-semibold text-ink-primary font-display">Revision History</h2>
-        <div className="mt-3 space-y-2 text-sm">
-          {versions.map((v) => (
-            <div key={v.version} className="flex justify-between items-center border-b border-border-hairline/40 pb-2">
-              <span className="text-ink-secondary text-xs font-mono">Version {v.version} · {v.status}</span>
-              <Badge tone="neutral">{new Date(v.savedAt).toLocaleDateString()}</Badge>
-            </div>
-          ))}
-        </div>
-      </Card>
+      </div>
     </div>
   );
 }
-

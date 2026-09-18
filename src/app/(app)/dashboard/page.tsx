@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { PageHeader, Badge } from "@/components/ui";
 import { BentoCard, BentoCardGrid, GlobalSpotlight } from "@/components/MagicBento";
+import { trackEvent } from "@/lib/track";
 
 type Intelligence = {
   totals: { proposals: number; clients: number; linkedClients: number; averageRisk: number | null; highRisk: number; controlled: number; dueFollowUps: number; groundedClaims: number; assumptions: number };
@@ -18,8 +19,34 @@ type Intelligence = {
   };
 };
 
+type PricingBrain = {
+  sampleSize: number;
+  averageHoursVariancePct: number | null;
+  averageCostVariancePct: number | null;
+  averageActualMarginPct: number | null;
+  records: Array<{
+    projectId: string;
+    client: string;
+    stage: string;
+    estimatedHours: number;
+    actualHours: number;
+    hoursVariance: number | null;
+    estimatedCost: number;
+    actualCost: number;
+    costVariance: number | null;
+    quotedPrice: number;
+    actualRevenue: number;
+    actualMarginPct: number | null;
+  }>;
+  guidance: string;
+};
+
+type Activity = { counts: Record<string, number>; lastEventAt: string; eventsTracked: number };
+
 export default function DashboardPage() {
   const [data, setData] = useState<Intelligence | null>(null);
+  const [pricing, setPricing] = useState<PricingBrain | null>(null);
+  const [activity, setActivity] = useState<Activity | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,6 +54,15 @@ export default function DashboardPage() {
       .then((r) => r.json())
       .then(setData)
       .catch(() => {});
+    fetch("/api/pricing-brain")
+      .then((r) => r.json())
+      .then(setPricing)
+      .catch(() => {});
+    fetch("/api/analytics/summary")
+      .then((r) => r.json())
+      .then(setActivity)
+      .catch(() => {});
+    trackEvent("workspace_loaded");
   }, []);
 
   if (!data) return <p className="text-xs uppercase font-mono tracking-wider text-ink-muted">Loading…</p>;
@@ -165,6 +201,77 @@ export default function DashboardPage() {
             </div>
           </BentoCard>
         </div>
+
+        {/* Pricing Brain */}
+        {pricing && pricing.sampleSize > 0 && (
+          <div className="grid grid-cols-1 gap-4">
+            <BentoCard className="p-5" glowColor="78, 135, 112">
+              <div className="flex items-center justify-between border-b border-border-hairline pb-2.5">
+                <h2 className="font-display text-lg font-medium text-ink-primary tracking-tight">Pricing Brain</h2>
+                <span className="text-[11px] font-mono text-ink-muted">Estimate vs. Actual Calibration</span>
+              </div>
+
+              <dl className="mt-3.5 space-y-2.5 text-xs">
+                <Row label="Avg. Hours Variance" value={pricing.averageHoursVariancePct !== null ? `${pricing.averageHoursVariancePct}%` : "—"} isMono />
+                <Row label="Avg. Cost Variance" value={pricing.averageCostVariancePct !== null ? `${pricing.averageCostVariancePct}%` : "—"} isMono />
+                <Row label="Avg. Actual Margin" value={pricing.averageActualMarginPct !== null ? `${pricing.averageActualMarginPct}%` : "—"} isMono />
+              </dl>
+
+              <p className="mt-4 text-[11px] font-mono text-ink-muted border-t border-border-subtle pt-2.5">
+                {pricing.guidance}
+              </p>
+
+              <p className="mt-4 text-[11px] font-mono text-ink-muted">
+                Based on {pricing.sampleSize} closed deal(s) with recorded actuals.
+              </p>
+
+              <div className={`mt-2 divide-y divide-border-subtle ${pricing.records.length > 8 ? "max-h-80 overflow-y-auto" : ""}`}>
+                {pricing.records.map((r) => (
+                  <Link
+                    key={r.projectId}
+                    href={`/proposals/${r.projectId}`}
+                    className="flex items-center justify-between gap-3 py-2 text-xs hover:bg-surface-3 px-2 rounded-[4px] transition-colors"
+                  >
+                    <div className="flex flex-col">
+                      <span className="text-ink-primary font-medium">{r.client}</span>
+                      <span className="text-[11px] text-ink-muted">{r.stage}</span>
+                    </div>
+                    <span className="font-mono tabular-nums text-ink-secondary">
+                      {r.estimatedHours} → {r.actualHours}h
+                    </span>
+                    <span className="font-mono tabular-nums text-ink-secondary">
+                      ${r.estimatedCost.toLocaleString()} → ${r.actualCost.toLocaleString()}
+                    </span>
+                    {r.actualMarginPct !== null && (
+                      <Badge tone={r.actualMarginPct >= 20 ? "success" : r.actualMarginPct >= 0 ? "warning" : "danger"}>
+                        {r.actualMarginPct}%
+                      </Badge>
+                    )}
+                  </Link>
+                ))}
+              </div>
+            </BentoCard>
+          </div>
+        )}
+
+        {/* Activity */}
+        {activity && activity.eventsTracked > 0 && (
+          <div className="grid grid-cols-1 gap-4">
+            <BentoCard className="p-5" glowColor="78, 135, 112">
+              <div className="flex items-center justify-between border-b border-border-hairline pb-2.5">
+                <h2 className="font-display text-lg font-medium text-ink-primary tracking-tight">Activity</h2>
+                <span className="text-[11px] font-mono text-ink-muted">
+                  {activity.eventsTracked} events tracked · last {new Date(activity.lastEventAt).toLocaleString()}
+                </span>
+              </div>
+              <dl className="mt-3.5 space-y-2.5 text-xs">
+                {Object.entries(activity.counts).map(([name, count]) => (
+                  <Row key={name} label={name.replaceAll("_", " ")} value={String(count)} isMono />
+                ))}
+              </dl>
+            </BentoCard>
+          </div>
+        )}
       </BentoCardGrid>
     </div>
   );

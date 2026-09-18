@@ -7,7 +7,7 @@ import { Card, Button, Input, Textarea, Label } from "@/components/ui";
 // with a real URL (same rationale as /share/[token]).
 export default function DiscoveryPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = use(params);
-  const [discovery, setDiscovery] = useState<{ client: string; questions: string[]; status: string } | null>(null);
+  const [discovery, setDiscovery] = useState<{ client: string; questions: Array<{ question: string; why?: string; answerType?: string } | string>; status: string } | null>(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [answers, setAnswers] = useState<string[]>([]);
@@ -58,7 +58,7 @@ export default function DiscoveryPage({ params }: { params: Promise<{ token: str
         <div className="mt-4 space-y-3">
           {discovery.questions.map((q, i) => (
             <div key={i}>
-              <Label>{q}</Label>
+              <Label>{typeof q === "string" ? q : q.question}</Label>
               <Textarea rows={2} value={answers[i] || ""} onChange={(e) => setAnswers((a) => a.map((v, idx) => (idx === i ? e.target.value : v)))} />
             </div>
           ))}

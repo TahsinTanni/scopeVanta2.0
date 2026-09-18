@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { PageHeader, Button, Badge } from "@/components/ui";
 import { BentoCard, BentoCardGrid, GlobalSpotlight } from "@/components/MagicBento";
+import { trackEvent } from "@/lib/track";
 
 type BillingStatus = {
   billing: { status: string; daysLeft: number; limit: number; requiresAction?: boolean; action?: string };
@@ -42,10 +43,15 @@ export default function BillingPage() {
   const [error, setError] = useState("");
   const gridRef = useRef<HTMLDivElement>(null);
 
-  function load() {
-    fetch("/api/billing/status").then((r) => (r.ok ? r.json() : null)).then(setStatus);
+  async function load() {
+    const res = await fetch("/api/billing/status");
+    const data = res.ok ? await res.json() : null;
+    setStatus(data);
+    return data as BillingStatus | null;
   }
-  useEffect(load, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   async function switchPlan(plan: string) {
     setBusy(true);
@@ -57,7 +63,10 @@ export default function BillingPage() {
         setError(body.error || "Could not start checkout.");
         return;
       }
-      if (body.checkoutUrl) window.open(body.checkoutUrl, "_blank", "noopener,noreferrer");
+      if (body.checkoutUrl) {
+        trackEvent("checkout_started", { plan });
+        window.open(body.checkoutUrl, "_blank", "noopener,noreferrer");
+      }
       load();
     } finally {
       setBusy(false);
@@ -66,9 +75,13 @@ export default function BillingPage() {
 
   async function sync() {
     setBusy(true);
+    const previousStatus = status?.billing.status;
     try {
       await fetch("/api/billing/sync", { method: "POST" });
-      load();
+      const newStatus = await load();
+      if (newStatus?.billing.status === "verified_active" && previousStatus !== "verified_active") {
+        trackEvent("billing_verified");
+      }
     } finally {
       setBusy(false);
     }

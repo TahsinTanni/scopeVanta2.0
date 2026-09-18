@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { UserButton, OrganizationSwitcher } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
+import SupportChat from "@/components/SupportChat";
 
 // Post-auth app shell — replaces legacy App.tsx's sidebar nav (dashboard /
 // new / projects / clients / files / company / billing) with real routes
@@ -14,6 +15,7 @@ const NAV = [
   { href: "/proposals", label: "Proposals", icon: "description" },
   { href: "/clients", label: "Clients", icon: "group" },
   { href: "/knowledge", label: "Knowledge", icon: "library_books" },
+  { href: "/settings/rates", label: "Rate Library", icon: "payments" },
   { href: "/settings/company", label: "Company Profile", icon: "domain" },
   { href: "/settings/billing", label: "Plan & Billing", icon: "credit_card" },
 ];
@@ -64,6 +66,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </div>
       </aside>
       <main className="flex-1 overflow-y-auto px-8 py-8 bg-surface-0">{children}</main>
+      <SupportChat />
     </div>
   );
 }

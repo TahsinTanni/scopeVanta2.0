@@ -27,9 +27,9 @@ export const POST = withErrors(async (req: Request, { params }: { params: Promis
   const estimatedCost = Math.round(lines.reduce((s, v) => s + v.qty * v.hours * v.costRate, 0) * 100) / 100;
   const estimatedPrice = Math.round(lines.reduce((s, v) => s + v.qty * v.hours * v.sellRate, 0) * 100) / 100;
   const estimatedMarginPct = estimatedPrice ? Math.round(((estimatedPrice - estimatedCost) / estimatedPrice) * 1000) / 10 : 0;
-  const actualRevenue = Math.max(0, Number(b.actualRevenue || 0));
-  const actualCost = Math.max(0, Number(b.actualCost || 0));
-  const actualHours = Math.max(0, Number(b.actualHours || 0));
+  const actualRevenue = b.actualRevenue !== undefined ? Math.max(0, Number(b.actualRevenue)) : (d.actualRevenue || 0);
+  const actualCost = b.actualCost !== undefined ? Math.max(0, Number(b.actualCost)) : (d.actualCost || 0);
+  const actualHours = b.actualHours !== undefined ? Math.max(0, Number(b.actualHours)) : (d.actualHours || 0);
   const actualMarginPct = actualRevenue ? Math.round(((actualRevenue - actualCost) / actualRevenue) * 1000) / 10 : 0;
 
   await prisma.commercialAudit.create({
@@ -45,8 +45,8 @@ export const POST = withErrors(async (req: Request, { params }: { params: Promis
         estimateLines: lines,
         estimateSummary: { estimatedHours, estimatedCost, estimatedPrice, estimatedMarginPct },
         actualRevenue,
-        actualCost: actualCost || d.actualCost || 0,
-        actualHours: actualHours || d.actualHours || 0,
+        actualCost,
+        actualHours,
         actualMarginPct,
         clientRequestInbox: String(b.clientRequest || d.clientRequestInbox || "").slice(0, 10000),
         nextBestAction: "Recalculate Opportunity Lab so scope, pricing, feasibility and negotiation reflect the latest estimate.",

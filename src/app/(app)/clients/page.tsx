@@ -2,15 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { Card, PageHeader, Button, Input, Textarea, Select, Label, Badge, EmptyState } from "@/components/ui";
+import { trackEvent } from "@/lib/track";
 
 type Client = {
   id: string; name: string; company?: string | null; email?: string | null; phone?: string | null; website?: string | null;
   industry?: string | null; lifecycleStatus?: string | null; notes?: string | null; goals?: string | null; nextStep?: string | null;
+  preferences?: string | null; decisionMakers?: string | null; painPoints?: string | null; buyingCriteria?: string | null;
+  knownObjections?: string | null; followUpDate?: string | null; logoUrl?: string | null;
   proposalCount?: number; averageRisk?: number | null;
 };
 
 const STATUSES = ["Prospect", "Active", "Won", "Dormant", "Lost"];
-const EMPTY = { name: "", company: "", email: "", phone: "", website: "", industry: "", status: "Prospect", notes: "", goals: "", nextStep: "" };
+const EMPTY = {
+  name: "", company: "", email: "", phone: "", website: "", industry: "", status: "Prospect", notes: "", goals: "", nextStep: "",
+  preferences: "", decisionMakers: "", painPoints: "", buyingCriteria: "", knownObjections: "", followUpDate: "",
+};
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -18,6 +24,7 @@ export default function ClientsPage() {
   const [draft, setDraft] = useState<typeof EMPTY | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   function load() {
     fetch("/api/clients").then((r) => r.json()).then((d) => setClients(d.clients || []));
@@ -34,6 +41,7 @@ export default function ClientsPage() {
       setError(body.error || "Could not save client.");
       return;
     }
+    if (!editingId) trackEvent("client_created", { clientId: body.client?.id });
     setDraft(null);
     setEditingId(null);
     load();
@@ -49,7 +57,30 @@ export default function ClientsPage() {
     load();
   }
 
+  async function uploadLogo(file: File) {
+    if (!editingId) return;
+    setUploadingLogo(true);
+    setError("");
+    try {
+      const content = await fileToBase64(file);
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, type: file.type, content, kind: "client_logo", clientId: editingId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(body.error || "Logo upload failed.");
+        return;
+      }
+      load();
+    } finally {
+      setUploadingLogo(false);
+    }
+  }
+
   const filtered = clients.filter((c) => !search || c.name.toLowerCase().includes(search.toLowerCase()) || (c.company || "").toLowerCase().includes(search.toLowerCase()));
+  const editingClient = editingId ? clients.find((c) => c.id === editingId) : undefined;
 
   return (
     <div className="space-y-6">
@@ -90,6 +121,27 @@ export default function ClientsPage() {
           <h2 className="mb-4 text-base font-semibold text-ink-primary">
             {editingId ? "Edit Client" : "New Client"}
           </h2>
+
+          {editingId && (
+            <div className="mb-4 flex items-center gap-3">
+              {editingClient?.logoUrl && (
+                <img src={editingClient.logoUrl} alt="" className="h-10 w-10 rounded-full object-cover border border-border-hairline" />
+              )}
+              <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
+                <span className="material-symbols-outlined text-[18px]">
+                  {uploadingLogo ? "progress_activity" : "upload_file"}
+                </span>
+                <span>{uploadingLogo ? "Uploading…" : "Upload Logo"}</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept="image/*"
+                  onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])}
+                />
+              </label>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div><Label>Name</Label><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></div>
             <div><Label>Company</Label><Input value={draft.company} onChange={(e) => setDraft({ ...draft, company: e.target.value })} /></div>
@@ -104,8 +156,14 @@ export default function ClientsPage() {
               </Select>
             </div>
             <div><Label>Next step</Label><Input value={draft.nextStep} onChange={(e) => setDraft({ ...draft, nextStep: e.target.value })} /></div>
+            <div><Label>Follow-up Date</Label><Input type="date" value={draft.followUpDate} onChange={(e) => setDraft({ ...draft, followUpDate: e.target.value })} /></div>
             <div className="col-span-2"><Label>Goals</Label><Textarea rows={2} value={draft.goals} onChange={(e) => setDraft({ ...draft, goals: e.target.value })} /></div>
             <div className="col-span-2"><Label>Notes</Label><Textarea rows={2} value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} /></div>
+            <div className="col-span-2"><Label>Preferences</Label><Textarea rows={2} value={draft.preferences} onChange={(e) => setDraft({ ...draft, preferences: e.target.value })} /></div>
+            <div className="col-span-2"><Label>Decision Makers</Label><Textarea rows={2} value={draft.decisionMakers} onChange={(e) => setDraft({ ...draft, decisionMakers: e.target.value })} /></div>
+            <div className="col-span-2"><Label>Pain Points</Label><Textarea rows={2} value={draft.painPoints} onChange={(e) => setDraft({ ...draft, painPoints: e.target.value })} /></div>
+            <div className="col-span-2"><Label>Buying Criteria</Label><Textarea rows={2} value={draft.buyingCriteria} onChange={(e) => setDraft({ ...draft, buyingCriteria: e.target.value })} /></div>
+            <div className="col-span-2"><Label>Known Objections</Label><Textarea rows={2} value={draft.knownObjections} onChange={(e) => setDraft({ ...draft, knownObjections: e.target.value })} /></div>
           </div>
           <div className="mt-5 flex gap-2">
             <Button onClick={save}>Save Client</Button>
@@ -121,9 +179,14 @@ export default function ClientsPage() {
           {filtered.map((c) => (
             <Card key={c.id} className="border-border-hairline bg-surface-1 hover:bg-surface-2 transition-colors p-5">
               <div className="flex items-start justify-between">
-                <div>
-                  <p className="font-semibold text-ink-primary text-base">{c.name}</p>
-                  <p className="text-xs text-ink-muted mt-0.5">{c.company || "Independent Buyer"}</p>
+                <div className="flex items-center gap-2.5">
+                  {c.logoUrl && (
+                    <img src={c.logoUrl} alt="" className="h-8 w-8 rounded-full object-cover border border-border-hairline shrink-0" />
+                  )}
+                  <div>
+                    <p className="font-semibold text-ink-primary text-base">{c.name}</p>
+                    <p className="text-xs text-ink-muted mt-0.5">{c.company || "Independent Buyer"}</p>
+                  </div>
                 </div>
                 <Badge tone={c.lifecycleStatus === "Won" || c.lifecycleStatus === "Active" ? "success" : "neutral"}>
                   {c.lifecycleStatus || "Prospect"}
@@ -142,7 +205,19 @@ export default function ClientsPage() {
                 )}
               </div>
               <div className="mt-4 flex gap-2 border-t border-border-hairline/40 pt-3">
-                <Button variant="secondary" className="text-xs py-1.5 px-3" onClick={() => { setEditingId(c.id); setDraft({ ...EMPTY, ...c, status: c.lifecycleStatus || "Prospect" } as typeof EMPTY); }}>
+                <Button
+                  variant="secondary"
+                  className="text-xs py-1.5 px-3"
+                  onClick={() => {
+                    setEditingId(c.id);
+                    setDraft({
+                      ...EMPTY,
+                      ...c,
+                      status: c.lifecycleStatus || "Prospect",
+                      followUpDate: c.followUpDate ? String(c.followUpDate).slice(0, 10) : "",
+                    } as typeof EMPTY);
+                  }}
+                >
                   Edit
                 </Button>
                 <Button variant="danger" className="text-xs py-1.5 px-3" onClick={() => remove(c.id)}>
@@ -155,4 +230,13 @@ export default function ClientsPage() {
       )}
     </div>
   );
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }

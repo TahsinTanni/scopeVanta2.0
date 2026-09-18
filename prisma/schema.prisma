@@ -44,6 +44,7 @@ model User {
   createdProposalShares  ProposalShare[]   @relation("ProposalShareCreator")
   createdDiscoveryShares DiscoveryShare[]  @relation("DiscoveryShareCreator")
   commercialAudits       CommercialAudit[]
+  supportConversations   SupportConversation[]
 
   @@map("users")
 }
@@ -73,6 +74,7 @@ model Workspace {
   billingEvents       BillingEvent[]
   commercialAudits    CommercialAudit[]
   proposalVersions    ProposalVersion[]
+  supportConversations SupportConversation[]
 
   @@map("workspaces")
 }
@@ -599,4 +601,20 @@ model CommercialAudit {
   @@index([workspaceId])
   @@index([projectId])
   @@map("commercial_audit")
+}
+
+model SupportConversation {
+  id            String   @id @default(cuid())
+  workspaceId   String   @map("workspace_id")
+  userId        String?  @map("user_id")
+  // Array<{ role: "user" | "assistant"; text: string; at: string }>
+  messages      Json
+  lastMessageAt DateTime @default(now()) @map("last_message_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, lastMessageAt])
+  @@map("support_conversations")
 }
