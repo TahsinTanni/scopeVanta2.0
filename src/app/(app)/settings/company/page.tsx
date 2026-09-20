@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, PageHeader, Button, Input, Textarea, Label } from "@/components/ui";
+import { Card, PageHeader, Button, Input, Textarea, Label, Select } from "@/components/ui";
+import { CURRENCIES } from "@/lib/currency";
 
 export default function CompanyProfilePage() {
-  const [form, setForm] = useState({ contactName: "", contactEmail: "", address: "", businessName: "", website: "", expertise: "" });
+  const [form, setForm] = useState({ contactName: "", contactEmail: "", address: "", businessName: "", website: "", expertise: "", currency: "USD" });
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
@@ -68,6 +69,7 @@ export default function CompanyProfilePage() {
           <div className="col-span-2"><Label>Business address</Label><Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></div>
           <div><Label>Company name</Label><Input value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} /></div>
           <div><Label>Website</Label><Input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} /></div>
+          <div><Label>Deal currency</Label><Select value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>{CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.label}</option>)}</Select></div>
           <div className="col-span-2"><Label>Expertise & services</Label><Textarea rows={4} value={form.expertise} onChange={(e) => setForm({ ...form, expertise: e.target.value })} /></div>
         </div>
 
@@ -91,12 +93,12 @@ export default function CompanyProfilePage() {
         </div>
 
         {error && (
-          <div className="mt-4 rounded-[4px] border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-xs text-status-danger font-mono">
+          <div className="mt-4 rounded-[4px] border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger font-mono">
             {error}
           </div>
         )}
         {saved && (
-          <div className="mt-4 rounded-[4px] border border-status-success/30 bg-status-success/10 px-3 py-2 text-xs text-status-success font-mono">
+          <div className="mt-4 rounded-[4px] border border-success/30 bg-success/10 px-3 py-2 text-xs text-success font-mono">
             Profile saved successfully.
           </div>
         )}

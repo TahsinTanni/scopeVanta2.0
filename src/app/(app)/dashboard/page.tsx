@@ -5,11 +5,15 @@ import Link from "next/link";
 import { PageHeader, Badge } from "@/components/ui";
 import { BentoCard, BentoCardGrid, GlobalSpotlight } from "@/components/MagicBento";
 import { trackEvent } from "@/lib/track";
+import { formatCurrency } from "@/lib/currency";
 
 type Intelligence = {
   totals: { proposals: number; clients: number; linkedClients: number; averageRisk: number | null; highRisk: number; controlled: number; dueFollowUps: number; groundedClaims: number; assumptions: number };
   month: { proposals: number; previousProposals: number; averageRisk: number | null; previousAverageRisk: number | null };
   riskDistribution: { high: number; medium: number; low: number };
+  statusCounts: Record<string, number>;
+  currency: string;
+  activation: { companyProfile: boolean; knowledgeSource: boolean; clientContext: boolean; firstProposal: boolean; subscription: boolean };
   trend: Array<{ label: string; proposals: number; averageRisk: number | null }>;
   topRisk: Array<{ id: string; client: string; score: number; summary: string; createdAt: string }>;
   commercialPerformance: {
@@ -41,6 +45,8 @@ type PricingBrain = {
   guidance: string;
 };
 
+const STATUS_ORDER = ["Prospect", "Active", "Won", "Dormant", "Lost"];
+
 type Activity = { counts: Record<string, number>; lastEventAt: string; eventsTracked: number };
 
 export default function DashboardPage() {
@@ -67,6 +73,24 @@ export default function DashboardPage() {
 
   if (!data) return <p className="text-xs uppercase font-mono tracking-wider text-ink-muted">Loading…</p>;
 
+  // Known statuses in a fixed order, then any unrecognised status so it never vanishes.
+  const statusCounts = data.statusCounts ?? {};
+  const clientStatuses = [
+    ...STATUS_ORDER,
+    ...Object.keys(statusCounts).filter((k) => !STATUS_ORDER.includes(k)).sort(),
+  ]
+    .map((status) => ({ status, count: statusCounts[status] || 0 }))
+    .filter((s) => s.count > 0);
+
+  const milestones = [
+    { label: "Company Profile", done: data.activation?.companyProfile },
+    { label: "Knowledge Source", done: data.activation?.knowledgeSource },
+    { label: "Client Context", done: data.activation?.clientContext },
+    { label: "First Proposal", done: data.activation?.firstProposal },
+    { label: "Subscription", done: data.activation?.subscription },
+  ];
+  const showActivation = !!data.activation && milestones.some((m) => !m.done);
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -90,6 +114,28 @@ export default function DashboardPage() {
       />
 
       <BentoCardGrid gridRef={gridRef} className="space-y-5">
+        {/* Activation milestones — hidden once everything is complete */}
+        {showActivation && (
+          <div className="grid grid-cols-1 gap-4">
+            <BentoCard className="p-5" glowColor="78, 135, 112">
+              <div className="flex items-center justify-between border-b border-border-hairline pb-2.5">
+                <h2 className="font-display text-lg font-medium text-ink-primary tracking-tight">Get Set Up</h2>
+                <span className="text-[11px] font-mono text-ink-muted">
+                  {milestones.filter((m) => m.done).length} of {milestones.length} complete
+                </span>
+              </div>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2 text-xs font-mono">
+                {milestones.map((m) => (
+                  <div key={m.label} className="flex items-center gap-2">
+                    <span className={m.done ? "text-success font-bold" : "text-ink-muted"}>{m.done ? "✓" : "○"}</span>
+                    <span className="text-ink-secondary">{m.label}</span>
+                  </div>
+                ))}
+              </div>
+            </BentoCard>
+          </div>
+        )}
+
         {/* KPI metric strip */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
           <Stat label="Total Proposals" value={data.totals.proposals} sub={`${data.month.proposals} this month`} icon="description" />
@@ -125,8 +171,8 @@ export default function DashboardPage() {
               </div>
               <dl className="mt-3.5 space-y-2.5 text-xs">
                 <Row label="Historical Win Rate" value={data.commercialPerformance.winRate !== null ? `${data.commercialPerformance.winRate}%` : "—"} />
-                <Row label="Contracted Value Won" value={`$${data.commercialPerformance.wonValue.toLocaleString()}`} isMono />
-                <Row label="Open Pipeline Value" value={`$${data.commercialPerformance.openPipelineValue.toLocaleString()}`} isMono />
+                <Row label="Contracted Value Won" value={formatCurrency(data.commercialPerformance.wonValue, data.currency)} isMono />
+                <Row label="Open Pipeline Value" value={formatCurrency(data.commercialPerformance.openPipelineValue, data.currency)} isMono />
                 <Row label="Client Acceptance Rate" value={data.commercialPerformance.proposalDecisions.acceptanceRate !== null ? `${data.commercialPerformance.proposalDecisions.acceptanceRate}%` : "—"} />
               </dl>
             </div>
@@ -169,7 +215,7 @@ export default function DashboardPage() {
                 <div key={s.stage} className="flex items-center justify-between pt-2.5 text-xs">
                   <span className="text-ink-secondary">{s.stage}</span>
                   <span className="font-mono text-ink-primary">
-                    {s.count} deals · <strong className="text-accent-hover">${s.value.toLocaleString()}</strong>
+                    {s.count} deals · <strong className="text-accent-hover">{formatCurrency(s.value, data.currency)}</strong>
                   </span>
                 </div>
               ))}
@@ -201,6 +247,26 @@ export default function DashboardPage() {
             </div>
           </BentoCard>
         </div>
+
+        {/* Client Pipeline */}
+        {clientStatuses.length > 0 && (
+          <div className="grid grid-cols-1 gap-4">
+            <BentoCard className="p-5" glowColor="78, 135, 112">
+              <div className="flex items-center justify-between border-b border-border-hairline pb-2.5">
+                <h2 className="font-display text-lg font-medium text-ink-primary tracking-tight">Client Pipeline</h2>
+                <span className="text-[11px] font-mono text-ink-muted">By lifecycle status</span>
+              </div>
+              <div className="mt-3 space-y-1.5 divide-y divide-border-subtle">
+                {clientStatuses.map((s) => (
+                  <div key={s.status} className="flex items-center justify-between pt-2.5 text-xs">
+                    <span className="text-ink-secondary">{s.status}</span>
+                    <span className="font-mono tabular-nums text-ink-primary">{s.count}</span>
+                  </div>
+                ))}
+              </div>
+            </BentoCard>
+          </div>
+        )}
 
         {/* Pricing Brain */}
         {pricing && pricing.sampleSize > 0 && (
@@ -240,7 +306,7 @@ export default function DashboardPage() {
                       {r.estimatedHours} → {r.actualHours}h
                     </span>
                     <span className="font-mono tabular-nums text-ink-secondary">
-                      ${r.estimatedCost.toLocaleString()} → ${r.actualCost.toLocaleString()}
+                      {formatCurrency(r.estimatedCost, data.currency)} → {formatCurrency(r.actualCost, data.currency)}
                     </span>
                     {r.actualMarginPct !== null && (
                       <Badge tone={r.actualMarginPct >= 20 ? "success" : r.actualMarginPct >= 0 ? "warning" : "danger"}>

@@ -22,10 +22,16 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
   let extractedText = "";
   let extractionMethod = "";
   let extractionError = "";
+  let truncated = false;
   try {
     if (/\.(txt|md)$/i.test(file.fileName)) {
-      extractedText = Buffer.from(stored.content, "base64").toString("utf8").slice(0, 30000);
-      if (!extractedText.trim() && file.extractedText) extractedText = file.extractedText.slice(0, 30000);
+      const raw = Buffer.from(stored.content, "base64").toString("utf8");
+      truncated = raw.length > 30000;
+      extractedText = raw.slice(0, 30000);
+      if (!extractedText.trim() && file.extractedText) {
+        extractedText = file.extractedText.slice(0, 30000);
+        truncated = file.truncated;
+      }
       extractionMethod = "text";
     } else if (/\.pdf$/i.test(file.fileName) || file.mimeType === "application/pdf") {
       const pdf = await aiGenerate({
@@ -36,7 +42,9 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
         maxTokens: 7600,
         temperature: 0,
       });
-      extractedText = pdf.text.trim().slice(0, 30000);
+      const pdfText = pdf.text.trim();
+      truncated = pdfText.length > 30000;
+      extractedText = pdfText.slice(0, 30000);
       extractionMethod = "pdf-ai";
     } else if (
       /\.docx?$/i.test(file.fileName) ||
@@ -50,8 +58,13 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
         maxTokens: 7600,
         temperature: 0,
       });
-      extractedText = word.text.trim().slice(0, 30000);
-      if (!extractedText || extractedText.length < 20 || /^[A-Za-z0-9+/=\s]{100,}$/.test(extractedText)) extractedText = "";
+      const wordText = word.text.trim();
+      truncated = wordText.length > 30000;
+      extractedText = wordText.slice(0, 30000);
+      if (!extractedText || extractedText.length < 20 || /^[A-Za-z0-9+/=\s]{100,}$/.test(extractedText)) {
+        extractedText = "";
+        truncated = false;
+      }
       extractionMethod = file.fileName.toLowerCase().endsWith(".docx") ? "docx-ai" : "doc-ai";
     } else if (file.mimeType.startsWith("image/")) {
       const imageText = await aiOcr({
@@ -63,7 +76,9 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
         maxTokens: 6000,
         temperature: 0,
       });
-      extractedText = imageText.text.trim().slice(0, 30000);
+      const ocrText = imageText.text.trim();
+      truncated = ocrText.length > 30000;
+      extractedText = ocrText.slice(0, 30000);
       extractionMethod = "image-ocr";
     } else {
       return error("This stored file format cannot be reprocessed.", 400);
@@ -116,6 +131,7 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
         extractedText,
         extractionMethod,
         extractionError: "",
+        truncated,
         intelligence: intelligence as object,
         intelligenceStatus: "ready",
         intelligenceError: "",

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, PageHeader, Button, Input, Textarea, Select, Label, Badge, EmptyState } from "@/components/ui";
 import { trackEvent } from "@/lib/track";
 
@@ -25,11 +26,39 @@ export default function ClientsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const router = useRouter();
+  const editParam = useSearchParams().get("edit");
+  const handledEdit = useRef<string | null>(null);
 
   function load() {
     fetch("/api/clients").then((r) => r.json()).then((d) => setClients(d.clients || []));
   }
   useEffect(load, []);
+
+  // Single source of truth for opening a client's edit form (Edit button + ?edit= deep link).
+  function startEdit(c: Client) {
+    setEditingId(c.id);
+    setDraft({
+      ...EMPTY,
+      ...c,
+      status: c.lifecycleStatus || "Prospect",
+      followUpDate: c.followUpDate ? String(c.followUpDate).slice(0, 10) : "",
+    } as typeof EMPTY);
+  }
+
+  // Deep link from the command palette: /clients?edit=<id>. Silently ignores unknown ids.
+  useEffect(() => {
+    if (!editParam || handledEdit.current === editParam) return;
+    const match = clients.find((c) => c.id === editParam);
+    if (!match) return;
+    handledEdit.current = editParam;
+    startEdit(match);
+    router.replace("/clients"); // clear the param so the same link works again later
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clients, editParam]);
+  useEffect(() => {
+    if (!editParam) handledEdit.current = null;
+  }, [editParam]);
 
   async function save() {
     if (!draft) return;
@@ -111,7 +140,7 @@ export default function ClientsPage() {
       </div>
 
       {error && (
-        <div className="rounded-[4px] border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-xs text-status-danger font-mono">
+        <div className="rounded-[4px] border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger font-mono">
           {error}
         </div>
       )}
@@ -208,15 +237,7 @@ export default function ClientsPage() {
                 <Button
                   variant="secondary"
                   className="text-xs py-1.5 px-3"
-                  onClick={() => {
-                    setEditingId(c.id);
-                    setDraft({
-                      ...EMPTY,
-                      ...c,
-                      status: c.lifecycleStatus || "Prospect",
-                      followUpDate: c.followUpDate ? String(c.followUpDate).slice(0, 10) : "",
-                    } as typeof EMPTY);
-                  }}
+                  onClick={() => startEdit(c)}
                 >
                   Edit
                 </Button>

@@ -22,6 +22,7 @@ export const GET = withErrors(async () => {
         status: f.status.toLowerCase(),
         extractedChars: (f.extractedText || "").length,
         error: f.extractionError || "",
+        truncated: f.truncated,
         intelligenceStatus: f.intelligenceStatus,
         intelligenceError: f.intelligenceError || "",
         documentType: intelligence?.documentType || "",

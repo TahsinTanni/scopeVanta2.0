@@ -3,11 +3,12 @@
 import { use, useEffect, useState } from "react";
 import { Card, Button, Input, Textarea, Label, Badge } from "@/components/ui";
 import dynamic from "next/dynamic";
+import { formatCurrency } from "@/lib/currency";
 
 const MoltenMetal = dynamic(() => import("@/components/MoltenMetal"), { ssr: false });
 
 type ShareView = {
-  client: string; seller: string; proposal: string; version: number; dealValue: number; status: string; decision: string;
+  client: string; seller: string; proposal: string; version: number; dealValue: number; currency: string; status: string; decision: string;
   selectedScenario: string; scopeSummary: Array<{ name: string; qty: number; hours: number; acceptance: string }>;
   scenarios: Array<{ name: string; price: number; hours: number; marginPct: number }>; timeline: string; views: number;
 };
@@ -104,7 +105,7 @@ export default function PublicSharePage({ params }: { params: Promise<{ token: s
                 >
                   <p className="font-medium text-ink-primary text-sm">{s.name}</p>
                   <p className="mt-2 text-lg font-mono tabular-nums text-accent font-semibold">
-                    ${s.price.toLocaleString()}
+                    {formatCurrency(s.price, share.currency)}
                   </p>
                   <p className="text-xs text-ink-muted font-mono tabular-nums mt-0.5">{s.hours} hours estimated</p>
                 </button>
@@ -124,7 +125,7 @@ export default function PublicSharePage({ params }: { params: Promise<{ token: s
           </Card>
         ) : done ? (
           <Card className="border-border-hairline bg-surface-1/90 backdrop-blur-sm p-5">
-            <p className="text-sm text-status-success font-medium">
+            <p className="text-sm text-success font-medium">
               Thank you — your response has been securely transmitted to {share.seller}.
             </p>
           </Card>
@@ -140,7 +141,7 @@ export default function PublicSharePage({ params }: { params: Promise<{ token: s
               <Textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} />
             </div>
             {error && (
-              <div className="mt-3 rounded-[4px] border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-xs text-status-danger font-mono">
+              <div className="mt-3 rounded-[4px] border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger font-mono">
                 {error}
               </div>
             )}

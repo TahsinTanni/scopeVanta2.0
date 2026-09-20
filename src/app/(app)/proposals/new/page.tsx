@@ -205,21 +205,19 @@ export default function NewProposalPage() {
           </div>
         </div>
         {error && (
-          <div className="mt-4 rounded-[4px] border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-xs text-status-danger font-mono">
+          <div className="mt-4 rounded-[4px] border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger font-mono">
             {error}
           </div>
         )}
         <div className="mt-6 flex items-center justify-between">
           <Button
             disabled={busy || brief.trim().length < 40 || selectedSections.length === 0}
+            loading={busy}
             onClick={generate}
             className="flex items-center gap-2"
           >
             {busy ? (
-              <>
-                <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
-                {uploadingReference ? "Uploading reference…" : "Analyzing Scope…"}
-              </>
+              <>{uploadingReference ? "Uploading reference…" : "Analyzing Scope…"}</>
             ) : (
               <>
                 <span className="material-symbols-outlined text-[16px]">auto_awesome</span>

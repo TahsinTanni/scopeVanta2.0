@@ -8,6 +8,7 @@ import { trackEvent } from "@/lib/track";
 type BillingStatus = {
   billing: { status: string; daysLeft: number; limit: number; requiresAction?: boolean; action?: string };
   plan: string; lifecycle: string; chargedThroughDate: string; trialEndsAt: string;
+  subscriptionId: string; verifiedAt: string; lastBillingEvent: string;
 };
 
 const PLANS = [
@@ -128,6 +129,20 @@ export default function BillingPage() {
             <p className="mt-4 text-xs text-ink-muted font-mono tabular-nums">
               Next renewal: {new Date(status.chargedThroughDate).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
             </p>
+          )}
+
+          {status.subscriptionId && (
+            <p className="mt-2 text-xs text-ink-muted font-mono tabular-nums">Subscription: {status.subscriptionId}</p>
+          )}
+
+          {status.verifiedAt && (
+            <p className="mt-2 text-xs text-ink-muted font-mono tabular-nums">
+              Last verified: {new Date(status.verifiedAt).toLocaleString()}
+            </p>
+          )}
+
+          {status.lastBillingEvent && (
+            <p className="mt-2 text-xs text-ink-muted font-mono tabular-nums">Last billing event: {status.lastBillingEvent}</p>
           )}
 
           {status.billing.action && (

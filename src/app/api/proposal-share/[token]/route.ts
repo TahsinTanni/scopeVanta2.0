@@ -13,13 +13,18 @@ export const GET = withErrors(async (_req: Request, { params }: { params: Promis
   const { token } = await params;
   if (!token) return error("Share link is invalid.", 400);
   const s = await prisma.proposalShare.findUnique({ where: { token } });
-  if (!s || s.token !== token || s.status === "revoked") return error("This proposal link is unavailable.", 404);
+  if (!s || s.token !== token || s.status === "revoked" || (s.expiresAt && s.expiresAt.getTime() < Date.now())) return error("This proposal link is unavailable.", 404);
   const d = s.data as ShareData;
 
   const viewedAt = new Date().toISOString();
   const engagement = [...(Array.isArray(d.engagement) ? d.engagement : []).slice(-49), { type: "view", at: viewedAt }];
   const views = Number(d.views || 0) + 1;
-  await prisma.proposalShare.update({ where: { id: s.id }, data: { data: { ...d, views, lastViewedAt: viewedAt, engagement } as object } });
+  // The seller's deal currency is looked up alongside the view-count write. A failed lookup
+  // must never break the buyer's page, so it degrades to USD.
+  const [, profile] = await Promise.all([
+    prisma.proposalShare.update({ where: { id: s.id }, data: { data: { ...d, views, lastViewedAt: viewedAt, engagement } as object } }),
+    prisma.companyProfile.findUnique({ where: { workspaceId: s.workspaceId } }).catch(() => null),
+  ]);
 
   return json({
     share: {
@@ -28,6 +33,7 @@ export const GET = withErrors(async (_req: Request, { params }: { params: Promis
       proposal: d.proposal,
       version: d.version,
       dealValue: d.dealValue,
+      currency: profile?.currency || "USD",
       status: s.status,
       decision: d.decision,
       decidedAt: d.decidedAt,

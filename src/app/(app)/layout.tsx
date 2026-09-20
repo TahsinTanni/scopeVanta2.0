@@ -4,6 +4,9 @@ import { UserButton, OrganizationSwitcher } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import SupportChat from "@/components/SupportChat";
+import { ToastProvider } from "@/components/Toast";
+import CommandPalette from "@/components/CommandPalette";
+import { NavigationGuardProvider } from "@/components/NavigationGuard";
 
 // Post-auth app shell — replaces legacy App.tsx's sidebar nav (dashboard /
 // new / projects / clients / files / company / billing) with real routes
@@ -29,8 +32,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!profile?.onboarded) redirect("/onboarding");
 
   return (
-    <div className="flex min-h-screen bg-surface-0 font-body">
-      <aside className="no-print flex w-64 shrink-0 flex-col border-r border-border-hairline bg-surface-1">
+    <ToastProvider>
+    <NavigationGuardProvider>
+    <div className="flex h-screen overflow-hidden bg-surface-0 font-body">
+      <aside className="no-print flex w-64 shrink-0 flex-col overflow-y-auto border-r border-border-hairline bg-surface-1">
         <div className="flex items-center gap-2.5 border-b border-border-hairline px-5 py-4">
           <div className="h-6 w-6 rounded-[4px] bg-accent flex items-center justify-center text-surface-0 font-bold text-xs">
             SV
@@ -47,6 +52,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               },
             }}
           />
+        </div>
+        <div className="px-3 pt-3">
+          <CommandPalette />
         </div>
         <nav className="flex-1 space-y-0.5 px-3 py-4">
           {NAV.map((item) => (
@@ -68,5 +76,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <main className="flex-1 overflow-y-auto px-8 py-8 bg-surface-0">{children}</main>
       <SupportChat />
     </div>
+    </NavigationGuardProvider>
+    </ToastProvider>
   );
 }

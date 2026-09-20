@@ -165,6 +165,7 @@ model CompanyProfile {
   industry         String?
   logoPath         String?  @map("logo_path")
   onboarded        Boolean  @default(false)
+  currency         String   @default("USD") @map("currency")
   branding         Json?
   proposalDefaults Json?    @map("proposal_defaults")
   createdAt        DateTime @default(now()) @map("created_at")
@@ -334,6 +335,7 @@ model KnowledgeFile {
   extractedText      String?             @map("extracted_text") @db.Text
   extractionMethod   String?             @map("extraction_method")
   extractionError    String?             @map("extraction_error")
+  truncated          Boolean             @default(false)
   intelligence       Json?
   intelligenceStatus String?             @map("intelligence_status")
   intelligenceError  String?             @map("intelligence_error")
@@ -476,6 +478,11 @@ model ProposalShare {
   createdByUserId String?   @map("created_by_user_id")
   createdAt       DateTime  @default(now()) @map("created_at")
   revokedAt       DateTime? @map("revoked_at")
+  expiresAt       DateTime? @map("expires_at")
+  // Buyer Release: an id plus a SHA-256 of the exact snapshot shared with the buyer.
+  releaseId       String?   @unique @map("release_id")
+  releaseHash     String?   @map("release_hash")
+  releasedAt      DateTime? @map("released_at")
 
   project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -496,6 +503,7 @@ model DiscoveryShare {
   createdByUserId String?   @map("created_by_user_id")
   createdAt       DateTime  @default(now()) @map("created_at")
   revokedAt       DateTime? @map("revoked_at")
+  expiresAt       DateTime? @map("expires_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   project   Project?  @relation(fields: [projectId], references: [id], onDelete: SetNull)

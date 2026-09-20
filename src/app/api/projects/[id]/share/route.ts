@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
+import { createHash } from "node:crypto";
 import { projectData } from "@/lib/project-data";
 
 // POST /api/projects/:id/share — legacy/backend/index.ts:4064-4147.
@@ -28,25 +29,45 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
       : [];
 
   const now = new Date().toISOString();
-  await prisma.proposalShare.create({
+  const nowDate = new Date(now);
+
+  // Buyer Release: the exact values shared with the buyer, hashed from an explicit
+  // fixed-key-order snapshot (not the loosely ordered `data` object). The same
+  // consts feed both this snapshot and the stored `data`, so they cannot diverge.
+  const client = p.clientLabel || "Client";
+  const seller = profile.businessName || profile.contactName || "Seller";
+  const proposalText = String(p.proposal).slice(0, 80000);
+  const dealValue = Number(p.dealValue || 0);
+  const timeline = String(p.timeline || "");
+  const releaseId = `rel_${crypto.randomUUID()}`;
+  const releaseSnapshot = { client, seller, proposalVersion: p.currentVersion, proposal: proposalText, dealValue, scenarios, timeline };
+  const releaseHash = createHash("sha256").update(JSON.stringify(releaseSnapshot)).digest("hex");
+  // Supersede earlier live shares (not ones the buyer already decided on), then create the new one, atomically.
+  await prisma.$transaction([
+    prisma.proposalShare.updateMany({ where: { projectId: id, status: { notIn: ["revoked", "accepted", "changes_requested"] } }, data: { status: "revoked", revokedAt: nowDate } }),
+    prisma.proposalShare.create({
     data: {
       projectId: id,
       workspaceId: ctx.workspaceId,
       token,
       status: "shared",
       createdByUserId: ctx.userId,
+      expiresAt: new Date(nowDate.getTime() + 60 * 86_400_000),
+      releaseId,
+      releaseHash,
+      releasedAt: nowDate,
       data: {
-        client: p.clientLabel || "Client",
-        seller: profile.businessName || profile.contactName || "Seller",
-        proposal: String(p.proposal).slice(0, 80000),
+        client,
+        seller,
+        proposal: proposalText,
         version: p.currentVersion,
-        dealValue: Number(p.dealValue || 0),
+        dealValue,
         decision: "",
         decidedAt: "",
         selectedScenario: "",
         scopeSummary: (d.estimateLines || []).slice(0, 60).map((v) => ({ name: v.name, qty: v.qty, hours: v.hours, acceptance: v.acceptance || "" })),
         scenarios,
-        timeline: String(p.timeline || ""),
+        timeline,
         proposalAuditScore: Number((d.proposalStudio?.audit as Record<string, unknown> | undefined)?.score || 0),
         responsibilities: (d.dealOS?.responsibilities as { responsibilities?: unknown[] } | undefined)?.responsibilities || [],
         handoff: (d.dealOS?.handoff as { handoff?: unknown } | undefined)?.handoff || {},
@@ -55,7 +76,8 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
         engagement: [],
       } as object,
     },
-  });
+    }),
+  ]);
 
   const updated = await prisma.project.update({
     where: { id },

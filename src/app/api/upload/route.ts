@@ -31,6 +31,7 @@ export const POST = withErrors(async (req: Request) => {
   let extractedText = "";
   let extractionMethod = "";
   let extractionError = "";
+  let truncated = false;
   let intelligence: Awaited<ReturnType<typeof structureKnowledge>> | undefined;
   let intelligenceStatus: "ready" | "failed" | undefined;
   let intelligenceError = "";
@@ -53,7 +54,9 @@ export const POST = withErrors(async (req: Request) => {
   } else {
     if (/\.(txt|md)$/i.test(safe)) {
       try {
-        extractedText = Buffer.from(b.content, "base64").toString("utf8").slice(0, 30000);
+        const raw = Buffer.from(b.content, "base64").toString("utf8");
+        truncated = raw.length > 30000;
+        extractedText = raw.slice(0, 30000);
         status = extractedText.trim() ? "ready" : "failed";
         extractionMethod = "text";
         if (status === "failed") extractionError = "No readable text was found.";
@@ -71,7 +74,9 @@ export const POST = withErrors(async (req: Request) => {
           maxTokens: 7600,
           temperature: 0,
         });
-        extractedText = pdf.text.trim().slice(0, 30000);
+        const pdfText = pdf.text.trim();
+        truncated = pdfText.length > 30000;
+        extractedText = pdfText.slice(0, 30000);
         status = extractedText ? "ready" : "failed";
         extractionMethod = "pdf-ai";
         if (status === "failed") extractionError = "No readable PDF text was found.";
@@ -94,12 +99,15 @@ export const POST = withErrors(async (req: Request) => {
           maxTokens: 7600,
           temperature: 0,
         });
-        extractedText = word.text.trim().slice(0, 30000);
+        const wordText = word.text.trim();
+        truncated = wordText.length > 30000;
+        extractedText = wordText.slice(0, 30000);
         const suspicious = !extractedText || extractedText.length < 20 || /^[A-Za-z0-9+/=\s]{100,}$/.test(extractedText);
         status = suspicious ? "failed" : "ready";
         extractionMethod = safe.toLowerCase().endsWith(".docx") ? "docx-ai" : "doc-ai";
         if (status === "failed") {
           extractedText = "";
+          truncated = false;
           extractionError = "No reliable readable Word document text was recovered.";
         }
       } catch (e) {
@@ -119,7 +127,9 @@ export const POST = withErrors(async (req: Request) => {
           maxTokens: 6000,
           temperature: 0,
         });
-        extractedText = imageText.text.trim().slice(0, 30000);
+        const ocrText = imageText.text.trim();
+        truncated = ocrText.length > 30000;
+        extractedText = ocrText.slice(0, 30000);
         status = extractedText ? "ready" : "failed";
         extractionMethod = "image-ocr";
         if (status === "failed") extractionError = "No readable text was found in the image.";
@@ -154,6 +164,7 @@ export const POST = withErrors(async (req: Request) => {
         extractedText,
         extractionMethod,
         extractionError,
+        truncated,
         intelligence: intelligence as object | undefined,
         intelligenceStatus,
         intelligenceError,
@@ -187,6 +198,7 @@ export const POST = withErrors(async (req: Request) => {
     status,
     extractedChars: extractedText.length,
     error: extractionError,
+    truncated,
     intelligenceStatus,
     intelligenceSummary: intelligence?.summary || "",
     documentType: intelligence?.documentType || "",

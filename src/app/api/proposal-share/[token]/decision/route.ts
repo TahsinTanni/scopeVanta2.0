@@ -10,7 +10,7 @@ export const POST = withErrors(async (req: Request, { params }: { params: Promis
   const { token } = await params;
   const b = (await req.json().catch(() => ({}))) as Body;
   const s = await prisma.proposalShare.findUnique({ where: { token } });
-  if (!s || s.token !== token || s.status === "revoked") return error("This proposal link is unavailable.", 404);
+  if (!s || s.token !== token || s.status === "revoked" || (s.expiresAt && s.expiresAt.getTime() < Date.now())) return error("This proposal link is unavailable.", 404);
   const d = s.data as ShareData;
   if (d.decision) return error("A decision has already been recorded for this proposal.", 409);
   if (b.decision !== "accepted" && b.decision !== "changes_requested") return error("Choose accept or request changes.", 400);

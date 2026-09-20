@@ -3,7 +3,7 @@ import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
 
 // GET /api/projects/:id/share-analytics — legacy/backend/index.ts:4242-4271.
-type ShareData = { views?: number; lastViewedAt?: string; selectedScenario?: string; decision?: string; engagement?: unknown[] };
+type ShareData = { views?: number; lastViewedAt?: string; selectedScenario?: string; decision?: string; decisionNote?: string; decisionName?: string; decisionEmail?: string; decidedAt?: string; engagement?: unknown[] };
 
 export const GET = withErrors(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const ctx = await requireWorkspaceAuth();
@@ -19,6 +19,10 @@ export const GET = withErrors(async (_req: Request, { params }: { params: Promis
     lastViewedAt: String(d.lastViewedAt || ""),
     selectedScenario: String(d.selectedScenario || ""),
     decision: String(d.decision || ""),
+    decisionNote: String(d.decisionNote || ""),
+    decisionName: String(d.decisionName || ""),
+    decisionEmail: String(d.decisionEmail || ""),
+    decidedAt: String(d.decidedAt || ""),
     events: Array.isArray(d.engagement) ? d.engagement : [],
   });
 });

@@ -1,8 +1,14 @@
 "use client";
 
 import { use, useEffect, useRef, useState } from "react";
-import { Card, Button, Textarea, Input, Label, Badge, Select } from "@/components/ui";
+import { useRouter } from "next/navigation";
+import { Card, Button, Textarea, Input, Label, Badge, Select, IconButton, StatusBanner } from "@/components/ui";
+import { Dialog } from "@/components/Dialog";
 import { trackEvent } from "@/lib/track";
+import { useToast } from "@/components/Toast";
+import { DEAL_STAGES } from "@/lib/deal-stages";
+import { formatCurrency, currencySymbol } from "@/lib/currency";
+import { useNavigationGuard } from "@/components/NavigationGuard";
 
 type Project = {
   id: string;
@@ -27,7 +33,7 @@ type Project = {
   data: Record<string, unknown> | null;
 };
 
-const DEAL_STAGES = ["Draft", "Proposal Ready", "Sent", "Follow-up", "Negotiation", "Won", "Lost"];
+const CONTRACT_STATUSES = ["Signed", "Verbal agreement — pending signature", "Purchase order received"];
 const DEAL_OS_ACTIONS = [
   "discovery", "compile", "margin", "choices", "negotiation", "change",
   "autopsy", "premortem", "redteam", "personalize", "meeting", "responsibilities", "handoff", "copilot"
@@ -112,12 +118,31 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   const [versions, setVersions] = useState<Array<{ version: number; savedAt: string; status: string; proposal: string; revisionSource: string }>>([]);
   const [restoredVersion, setRestoredVersion] = useState<number | null>(null);
   const editorCardRef = useRef<HTMLDivElement>(null);
-  const [shareAnalytics, setShareAnalytics] = useState<{ views: number; lastViewedAt: string; selectedScenario: string } | null>(null);
+  const [shareAnalytics, setShareAnalytics] = useState<{
+    views: number; lastViewedAt: string; selectedScenario: string;
+    decision?: string; decisionNote?: string; decisionName?: string; decisionEmail?: string; decidedAt?: string;
+    events?: Array<{ type: string; at: string; name?: string }>;
+  } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [viewMode, setViewMode] = useState<"preview" | "edit">("preview");
   const [briefExpanded, setBriefExpanded] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const { showToast } = useToast();
+  const router = useRouter();
+  const { setNavigationGuard } = useNavigationGuard();
+  const [pendingNavigation, setPendingNavigation] = useState<string | null>(null);
+  const [intelligenceMode, setIntelligenceMode] = useState<"guided" | "full">("guided");
+  const [pendingDealStage, setPendingDealStage] = useState<"Won" | "Lost" | null>(null);
+  const [outcomeReasonDraft, setOutcomeReasonDraft] = useState("");
+  // Commercial Closure Gate (Won only)
+  const [contractStatus, setContractStatus] = useState("");
+  const [packageChoice, setPackageChoice] = useState("");
+  const [packageCustom, setPackageCustom] = useState("");
+  const [finalPriceDraft, setFinalPriceDraft] = useState("");
+  const [depositRequired, setDepositRequired] = useState(false);
+  const [depositReceived, setDepositReceived] = useState(false);
+  const [kickoffDate, setKickoffDate] = useState("");
+  const [kickoffAuthorized, setKickoffAuthorized] = useState(false);
 
   const [dealOSAction, setDealOSAction] = useState("copilot");
   const [dealOSInput, setDealOSInput] = useState("");
@@ -140,6 +165,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   const [copiedStudioFollowUp, setCopiedStudioFollowUp] = useState(false);
   const [copiedDiscoveryLink, setCopiedDiscoveryLink] = useState(false);
   const [sellerLogoPath, setSellerLogoPath] = useState("");
+  const [currency, setCurrency] = useState("USD");
   const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set(["understand"]));
 
   async function load() {
@@ -149,7 +175,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
     fetch(`/api/projects/${id}/versions`).then((r) => r.json()).then((d) => setVersions(d.versions || [])).catch(() => {});
     fetch(`/api/projects/${id}/share-analytics`).then((r) => r.json()).then(setShareAnalytics).catch(() => {});
     fetch(`/api/projects/${id}/commercial-history`).then((r) => r.json()).then((d) => setHistory({ baselines: d.baselines || [], changeOrders: d.changeOrders || [] })).catch(() => {});
-    fetch(`/api/workspace/profile`).then((r) => r.json()).then((d) => setSellerLogoPath(d.profile?.logoPath || "")).catch(() => {});
+    fetch(`/api/workspace/profile`).then((r) => r.json()).then((d) => { setSellerLogoPath(d.profile?.logoPath || ""); setCurrency(d.profile?.currency || "USD"); }).catch(() => {});
   }
 
   function applyProject(p: Project) {
@@ -196,6 +222,61 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
     }
   }
 
+  // Per-browser UI preference (not project data). Read on mount, written on change.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("scopevanta:intelligenceMode");
+      if (saved === "guided" || saved === "full") setIntelligenceMode(saved);
+    } catch {}
+  }, []);
+
+  function changeIntelligenceMode(mode: "guided" | "full") {
+    setIntelligenceMode(mode);
+    try {
+      localStorage.setItem("scopevanta:intelligenceMode", mode);
+    } catch {}
+  }
+
+  const nextBestAction = typeof project?.data?.nextBestAction === "string" ? project.data.nextBestAction.trim() : "";
+
+  const unsavedEdits = proposalDraft !== (project?.proposal || "");
+
+  // Guard user clicks on links (sidebar etc.) while there are unsaved edits.
+  // Programmatic router.push() calls never pass through here.
+  useEffect(() => {
+    if (!unsavedEdits) return;
+    function onClick(e: MouseEvent) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const anchor = (e.target as Element | null)?.closest?.("a");
+      if (!anchor || !anchor.href || anchor.target === "_blank" || anchor.hasAttribute("download")) return;
+      const url = new URL(anchor.href, window.location.href);
+      if (url.origin !== window.location.origin || url.pathname === window.location.pathname) return;
+      e.preventDefault();
+      setPendingNavigation(url.pathname + url.search + url.hash);
+    }
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, [unsavedEdits]);
+
+  // Own the shared navigation guard only while there is something to protect,
+  // so programmatic navigation (command palette) opens the same dialog.
+  useEffect(() => {
+    if (!unsavedEdits) return;
+    setNavigationGuard((href) => setPendingNavigation(href));
+    return () => setNavigationGuard(null);
+  }, [unsavedEdits, setNavigationGuard]);
+
+  // Native "leave site?" prompt for tab close / refresh / typed URL / external links.
+  useEffect(() => {
+    if (!unsavedEdits) return;
+    function onBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [unsavedEdits]);
+
   function restoreVersion(version: (typeof versions)[number]) {
     const hasUnsavedEdits = proposalDraft !== (project?.proposal || "");
     if (hasUnsavedEdits) {
@@ -219,7 +300,24 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
     }
   }
 
-  async function updateDeal(patch: { dealStage?: string; dealValue?: number }) {
+  function closeDealDialog() {
+    setPendingDealStage(null);
+    setOutcomeReasonDraft("");
+    setContractStatus("");
+    setPackageChoice("");
+    setPackageCustom("");
+    setFinalPriceDraft("");
+    setDepositRequired(false);
+    setDepositReceived(false);
+    setKickoffDate("");
+    setKickoffAuthorized(false);
+  }
+
+  async function updateDeal(patch: {
+    dealStage?: string; dealValue?: number; outcomeReason?: string;
+    contractStatus?: string; finalPackage?: string; finalPrice?: number; depositRequired?: boolean; depositReceived?: boolean;
+    kickoffDate?: string; kickoffAuthorized?: boolean;
+  }) {
     const data = await call(`/api/projects/${id}/deal`, patch, "PUT");
     if (data) load();
   }
@@ -346,8 +444,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
 
   function handleCopy() {
     navigator.clipboard.writeText(proposalDraft);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    showToast("Copied to clipboard", "success");
   }
 
   function exportAsWordDoc() {
@@ -519,6 +616,12 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
     protect: !!project.data?.scopeBaseline,
   };
 
+  // Step header counts: base cards always shown + the advanced (AI) modules only in Full mode.
+  const advancedCount = (n: number) => (intelligenceMode === "full" ? n : 0);
+  const priceCount = 1 + advancedCount(1); // Scope & Economics (+ Opportunity Lab)
+  const proposeCount = 2 + advancedCount(1); // Document, Deal Room (+ Proposal Studio)
+  const winCount = advancedCount(3); // Deal-to-Profit OS, Win Plan, Close Coach
+  const protectCount = 3 + advancedCount(1); // Baseline, Actuals, History (+ Commercial Autopilot)
   const understandCount = (project.brief ? 1 : 0) + ((project.clarificationQuestions || []).length ? 1 : 0) + 1;
 
   function StepHeader({ stepKey, count }: { stepKey: (typeof STEP_KEYS)[number]; count: number }) {
@@ -559,13 +662,25 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={project.dealStage} onChange={(e) => updateDeal({ dealStage: e.target.value })} className="w-36 text-xs">
+          <Select
+            value={project.dealStage}
+            onChange={(e) => {
+              const next = e.target.value;
+              // Won/Lost need a recorded reason (required by the deal route), so collect it first.
+              if (next === "Won" || next === "Lost") {
+                setPendingDealStage(next);
+                if (next === "Won") setFinalPriceDraft(String(Number(project.dealValue || 0) || ""));
+              }
+              else updateDeal({ dealStage: next });
+            }}
+            className="w-36 text-xs"
+          >
             {DEAL_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
           </Select>
           <Input
             type="number"
             defaultValue={project.dealValue || ""}
-            placeholder="Deal value ($)"
+            placeholder={`Deal value (${currencySymbol(currency)})`}
             className="w-32 text-xs font-mono tabular-nums"
             onBlur={(e) => e.target.value && updateDeal({ dealValue: Number(e.target.value) })}
           />
@@ -581,9 +696,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
       </div>
 
       {/* DOCUMENT PREVIEW & PDF PRINT MODAL */}
-      {showDocModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 no-print overflow-y-auto">
-          <div className="flex flex-col w-full max-w-4xl max-h-[92vh] rounded-[12px] bg-surface-1 border border-border-hairline shadow-2xl overflow-hidden">
+      <Dialog open={showDocModal} onClose={() => setShowDocModal(false)} title="Executive Proposal Document" className="max-w-4xl">
             {/* Modal Header Bar */}
             <div className="flex items-center justify-between border-b border-border-hairline bg-surface-2 px-6 py-4">
               <div>
@@ -599,12 +712,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                   <span className="material-symbols-outlined text-[16px]">print</span>
                   Print / Save PDF
                 </Button>
-                <button
-                  onClick={() => setShowDocModal(false)}
-                  className="rounded-[4px] p-1.5 text-ink-muted hover:bg-surface-3 hover:text-ink-primary text-sm font-bold ml-2 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-[18px]">close</span>
-                </button>
+                <IconButton icon="close" label="Close" onClick={() => setShowDocModal(false)} className="ml-2" />
               </div>
             </div>
 
@@ -686,9 +794,129 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 </div>
               </div>
             </div>
+      </Dialog>
+
+      <Dialog open={pendingNavigation !== null} onClose={() => setPendingNavigation(null)} title="Unsaved changes">
+        <div className="space-y-4 p-6">
+          <h3 className="font-display text-base font-semibold text-ink-primary">Unsaved changes</h3>
+          <p className="text-sm text-ink-secondary">
+            You have unsaved changes in the proposal editor. Leaving now will discard them.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setPendingNavigation(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                const target = pendingNavigation;
+                if (target) router.push(target);
+                setPendingNavigation(null);
+              }}
+            >
+              Leave Without Saving
+            </Button>
           </div>
         </div>
-      )}
+      </Dialog>
+
+      <Dialog
+        open={pendingDealStage !== null}
+        onClose={closeDealDialog}
+        title={`Why was this deal ${pendingDealStage ?? ""}?`}
+      >
+        <div className="space-y-4 p-6">
+          <h3 className="font-display text-base font-semibold text-ink-primary">Why was this deal {pendingDealStage}?</h3>
+          <Textarea rows={4} value={outcomeReasonDraft} onChange={(e) => setOutcomeReasonDraft(e.target.value)} />
+          {pendingDealStage === "Won" && (
+            <div className="space-y-3 border-t border-border-hairline pt-4">
+              <div>
+                <Label>Contract status</Label>
+                <Select value={contractStatus} onChange={(e) => setContractStatus(e.target.value)}>
+                  <option value="">Select…</option>
+                  {CONTRACT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </Select>
+              </div>
+              <div>
+                <Label>Final package</Label>
+                {scenarios.length > 0 && (
+                  <Select value={packageChoice} onChange={(e) => setPackageChoice(e.target.value)}>
+                    <option value="">Select…</option>
+                    {scenarios.map((s) => <option key={s.name} value={s.name}>{s.name}</option>)}
+                    <option value="__custom">Custom</option>
+                  </Select>
+                )}
+                {(scenarios.length === 0 || packageChoice === "__custom") && (
+                  <Input className={scenarios.length > 0 ? "mt-2" : ""} value={packageCustom} onChange={(e) => setPackageCustom(e.target.value)} placeholder="Package name" />
+                )}
+              </div>
+              <div>
+                <Label>Final price ({currencySymbol(currency)})</Label>
+                <Input type="number" min={0} step="0.01" value={finalPriceDraft} onChange={(e) => setFinalPriceDraft(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 text-xs text-ink-secondary">
+                  <input type="checkbox" className="h-4 w-4 accent-accent" checked={depositRequired} onChange={(e) => { setDepositRequired(e.target.checked); if (!e.target.checked) setDepositReceived(false); }} />
+                  Deposit required
+                </label>
+                {depositRequired && (
+                  <label className="ml-6 flex items-center gap-2 text-xs text-ink-secondary">
+                    <input type="checkbox" className="h-4 w-4 accent-accent" checked={depositReceived} onChange={(e) => setDepositReceived(e.target.checked)} />
+                    Deposit received
+                  </label>
+                )}
+              </div>
+              <div>
+                <Label>Kickoff date</Label>
+                <Input type="date" value={kickoffDate} onChange={(e) => setKickoffDate(e.target.value)} />
+              </div>
+              <label className="flex items-center gap-2 text-xs text-ink-primary">
+                <input type="checkbox" className="h-4 w-4 accent-accent" checked={kickoffAuthorized} onChange={(e) => setKickoffAuthorized(e.target.checked)} />
+                I confirm this deal is ready for kickoff
+              </label>
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={closeDealDialog}>
+              Cancel
+            </Button>
+            <Button
+              variant={pendingDealStage === "Lost" ? "danger" : "primary"}
+              disabled={
+                !outcomeReasonDraft.trim() ||
+                (pendingDealStage === "Won" &&
+                  (!contractStatus ||
+                    finalPriceDraft.trim() === "" ||
+                    !Number.isFinite(Number(finalPriceDraft)) ||
+                    Number(finalPriceDraft) < 0 ||
+                    !kickoffDate ||
+                    !kickoffAuthorized))
+              }
+              onClick={() => {
+                if (!pendingDealStage) return;
+                if (pendingDealStage === "Won") {
+                  updateDeal({
+                    dealStage: "Won",
+                    outcomeReason: outcomeReasonDraft.trim(),
+                    contractStatus,
+                    finalPackage: (scenarios.length === 0 || packageChoice === "__custom" ? packageCustom : packageChoice).trim(),
+                    finalPrice: Number(finalPriceDraft),
+                    depositRequired,
+                    depositReceived,
+                    kickoffDate,
+                    kickoffAuthorized,
+                  });
+                } else {
+                  updateDeal({ dealStage: pendingDealStage, outcomeReason: outcomeReasonDraft.trim() });
+                }
+                closeDealDialog();
+              }}
+            >
+              Confirm
+            </Button>
+          </div>
+        </div>
+      </Dialog>
 
       {/* HIDDEN PRINT-ONLY CONTAINER (USED FOR CLEAN BROWSER PDF PRINTING) */}
       <div id="printable-proposal-doc" className="hidden print:block bg-white text-gray-900 p-8 font-sans">
@@ -766,13 +994,47 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
         </div>
       </div>
 
-      {error && <p className="no-print rounded-[4px] border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-xs font-mono text-status-danger">{error}</p>}
+      {error && <StatusBanner tone="danger" className="no-print">{error}</StatusBanner>}
 
       {(project.evidenceStatus === "needs_review" || project.commercialStale) && (
-        <div className="no-print rounded-[4px] border border-status-warning/30 bg-status-warning/10 px-3 py-2 text-xs font-mono text-status-warning">
+        <div className="no-print rounded-[4px] border border-warning/30 bg-warning/10 px-3 py-2 text-xs font-mono text-warning">
           {project.evidenceStatus === "needs_review" && "Evidence needs review after recent changes. "}
           {project.commercialStale && "Commercial guidance is stale — recalculate Opportunity Lab before sharing."}
         </div>
+      )}
+
+      {/* INTELLIGENCE MODE */}
+      <div className="no-print inline-flex rounded-[4px] border border-border-hairline bg-surface-1 p-0.5" role="group" aria-label="Intelligence mode">
+        {([["guided", "Guided"], ["full", "Full Intelligence"]] as const).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            aria-pressed={intelligenceMode === mode}
+            onClick={() => changeIntelligenceMode(mode)}
+            className={`rounded-[3px] px-3 py-1 text-xs font-medium transition-colors ${
+              intelligenceMode === mode ? "bg-accent text-surface-0" : "text-ink-muted hover:text-ink-primary"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* GUIDED-MODE HERO */}
+      {intelligenceMode === "guided" && (
+        <Card className="no-print border-border-hairline bg-surface-1 p-5">
+          <h2 className="text-sm font-semibold text-ink-primary font-display">Next Recommended Action</h2>
+          {nextBestAction ? (
+            <p className="mt-2 text-sm text-ink-secondary">{nextBestAction}</p>
+          ) : (
+            <p className="mt-2 text-sm text-ink-muted">
+              Run the opportunity through Scope &amp; Economics and Deal-to-Profit OS to get a specific next step
+            </p>
+          )}
+          <Button variant="secondary" className="mt-4 text-xs py-1 px-2.5" onClick={() => changeIntelligenceMode("full")}>
+            Switch to Full Intelligence
+          </Button>
+        </Card>
       )}
 
       {/* SIX-STEP RAIL */}
@@ -801,7 +1063,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-mono">
             {readiness.checks.map((c) => (
               <div key={c.label} className="flex items-center gap-2">
-                <span className={c.pass ? "text-status-success font-bold" : "text-ink-muted"}>
+                <span className={c.pass ? "text-success font-bold" : "text-ink-muted"}>
                   {c.pass ? "✓" : "○"}
                 </span>
                 <span className="text-ink-secondary">{c.label}</span>
@@ -865,7 +1127,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                         <ul className="space-y-1.5 text-xs text-ink-secondary">
                           {project.risks.map((risk, idx) => (
                             <li key={idx} className="flex items-start gap-2">
-                              <span className="text-status-warning mt-0.5">•</span>
+                              <span className="text-warning mt-0.5">•</span>
                               <span>{risk}</span>
                             </li>
                           ))}
@@ -914,7 +1176,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
 
               {!project.discoveryShareToken ? (
                 <div className="mt-4 space-y-3">
-                  <p className="text-xs text-ink-muted">Run Discovery Agent in Deal-to-Profit OS above, then create a discovery link to collect buyer answers before scoping.</p>
+                  <p className="text-xs text-ink-muted">Run Discovery Agent in Deal-to-Profit OS below, then create a discovery link to collect buyer answers before scoping.</p>
                   <Button disabled={busy === `/api/projects/${id}/discovery-share`} onClick={createDiscoveryShare}>
                     Create Discovery Link
                   </Button>
@@ -1074,7 +1336,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                     <button
                       type="button"
                       onClick={() => setGraphNodes((ns) => ns.filter((_, idx) => idx !== i))}
-                      className="col-span-1 p-2 text-status-danger hover:bg-status-danger/10 rounded-[4px] text-center font-bold text-sm transition-colors"
+                      className="col-span-1 p-2 text-danger hover:bg-danger/10 rounded-[4px] text-center font-bold text-sm transition-colors"
                       title="Remove node"
                     >
                       ✕
@@ -1116,7 +1378,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
 
       {/* STEP: PRICE */}
       <div id="step-price">
-        <StepHeader stepKey="price" count={2} />
+        <StepHeader stepKey="price" count={priceCount} />
         {expandedSteps.has("price") && (
           <div className="mt-2 space-y-6">
             {/* SCOPE & ECONOMICS */}
@@ -1153,14 +1415,14 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                     />
                     <Input
                       type="number"
-                      placeholder="Cost rate ($)"
+                      placeholder={`Cost rate (${currencySymbol(currency)})`}
                       value={line.costRate}
                       onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, costRate: Number(e.target.value) } : l)))}
                       className="col-span-1 font-mono tabular-nums text-xs"
                     />
                     <Input
                       type="number"
-                      placeholder="Sell rate ($)"
+                      placeholder={`Sell rate (${currencySymbol(currency)})`}
                       value={line.sellRate}
                       onChange={(e) => setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, sellRate: Number(e.target.value) } : l)))}
                       className="col-span-2 font-mono tabular-nums text-xs"
@@ -1168,7 +1430,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                     <button
                       type="button"
                       onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))}
-                      className="col-span-1 p-2 text-status-danger hover:bg-status-danger/10 rounded-[4px] text-center font-bold text-sm transition-colors"
+                      className="col-span-1 p-2 text-danger hover:bg-danger/10 rounded-[4px] text-center font-bold text-sm transition-colors"
                       title="Remove deliverable"
                     >
                       ✕
@@ -1181,7 +1443,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 <Button variant="secondary" onClick={() => setLines((ls) => [...ls, { name: "", role: "", qty: 1, hours: 0, costRate: 0, sellRate: 0 }])}>
                   + Add Deliverable
                 </Button>
-                <Button disabled={busy === `/api/projects/${id}/scope-economics`} onClick={calculateEconomics}>
+                <Button disabled={busy === `/api/projects/${id}/scope-economics`} loading={busy === `/api/projects/${id}/scope-economics`} onClick={calculateEconomics}>
                   Calculate Packages
                 </Button>
               </div>
@@ -1191,7 +1453,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                   {scenarios.map((s) => (
                     <div key={s.name} className="rounded-[4px] border border-border-hairline bg-surface-2 p-4 text-sm">
                       <p className="font-semibold text-ink-primary">{s.name}</p>
-                      <p className="mt-2 text-xl font-bold font-mono tabular-nums text-accent">${s.price.toLocaleString()}</p>
+                      <p className="mt-2 text-xl font-bold font-mono tabular-nums text-accent">{formatCurrency(s.price, currency)}</p>
                       <p className="mt-1 text-xs text-ink-muted font-mono tabular-nums">{s.hours} hours · {s.marginPct}% profit margin</p>
                     </div>
                   ))}
@@ -1200,13 +1462,14 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
             </Card>
 
             {/* OPPORTUNITY LAB */}
+            {intelligenceMode === "full" && (
             <Card className="no-print border-border-hairline bg-surface-1 p-5">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-semibold text-ink-primary font-display">Opportunity Lab (Commercial Intelligence)</h2>
                   <p className="text-xs text-ink-muted">AI scope diagnosis: unpriced work, margin firewall, and feasibility checks.</p>
                 </div>
-                <Button variant="secondary" disabled={busy === `/api/projects/${id}/commercial-lab`} onClick={runCommercialLab}>
+                <Button variant="secondary" disabled={busy === `/api/projects/${id}/commercial-lab`} loading={busy === `/api/projects/${id}/commercial-lab`} onClick={runCommercialLab}>
                   Recalculate
                 </Button>
               </div>
@@ -1220,13 +1483,14 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 </pre>
               )}
             </Card>
+            )}
           </div>
         )}
       </div>
 
       {/* STEP: PROPOSE */}
       <div id="step-propose">
-        <StepHeader stepKey="propose" count={3} />
+        <StepHeader stepKey="propose" count={proposeCount} />
 
         {/* PROPOSAL PRESENTATION & EDITOR — always visible, not collapsible */}
         <div className="mt-2">
@@ -1258,7 +1522,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 </div>
 
                 <Button variant="ghost" onClick={handleCopy} className="text-xs py-1 px-2.5">
-                  {copied ? "Copied ✓" : "Copy"}
+                  Copy
                 </Button>
               </div>
             </div>
@@ -1366,6 +1630,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
         {expandedSteps.has("propose") && (
           <div className="mt-6 space-y-6">
             {/* PROPOSAL STUDIO */}
+            {intelligenceMode === "full" && (
             <Card className="no-print border-border-hairline bg-surface-1 p-5">
               <div className="border-b border-border-hairline pb-2">
                 <h2 className="text-sm font-semibold text-ink-primary font-display">Proposal Studio</h2>
@@ -1430,15 +1695,15 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                   <div className="grid grid-cols-3 gap-2 text-xs font-mono tabular-nums">
                     <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5 text-center">
                       <span className="text-ink-muted block text-[11px]">Covered</span>
-                      <span className="font-semibold text-status-success">{studio.covered}</span>
+                      <span className="font-semibold text-success">{studio.covered}</span>
                     </div>
                     <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5 text-center">
                       <span className="text-ink-muted block text-[11px]">Ambiguous</span>
-                      <span className="font-semibold text-status-warning">{studio.ambiguous}</span>
+                      <span className="font-semibold text-warning">{studio.ambiguous}</span>
                     </div>
                     <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5 text-center">
                       <span className="text-ink-muted block text-[11px]">Unanswered</span>
-                      <span className="font-semibold text-status-danger">{studio.unanswered}</span>
+                      <span className="font-semibold text-danger">{studio.unanswered}</span>
                     </div>
                   </div>
                   {!!studio.items?.length && (
@@ -1569,6 +1834,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 </pre>
               )}
             </Card>
+            )}
 
             {/* CLIENT DEAL ROOM */}
             <Card className="no-print border-border-hairline bg-surface-1 p-5">
@@ -1578,9 +1844,43 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
               </div>
               {project.shareToken ? (
                 <div className="mt-4 space-y-3 text-sm">
+                  {shareAnalytics?.decision === "accepted" && (
+                    <StatusBanner tone="success">
+                      <span className="block font-semibold">
+                        Accepted by {shareAnalytics.decisionName || "the client"}
+                        {shareAnalytics.decidedAt ? ` on ${new Date(shareAnalytics.decidedAt).toLocaleString()}` : ""}
+                      </span>
+                      <span className="mt-1 block font-semibold">This acceptance is not a signed contract.</span>
+                    </StatusBanner>
+                  )}
+                  {shareAnalytics?.decision === "changes_requested" && (
+                    <div className="space-y-2">
+                      <StatusBanner tone="warning">
+                        Changes requested by {shareAnalytics.decisionName || "the client"}
+                        {shareAnalytics.decidedAt ? ` on ${new Date(shareAnalytics.decidedAt).toLocaleString()}` : ""}
+                      </StatusBanner>
+                      {shareAnalytics.decisionNote && (
+                        <pre className="whitespace-pre-wrap rounded-[4px] border border-warning/30 bg-surface-2 p-3 font-body text-sm text-ink-primary">
+                          {shareAnalytics.decisionNote}
+                        </pre>
+                      )}
+                    </div>
+                  )}
                   <p className="text-xs text-ink-muted font-mono tabular-nums">
-                    Share link active · {shareAnalytics && `${shareAnalytics.views} views${shareAnalytics.selectedScenario ? ` · package selected: ${shareAnalytics.selectedScenario}` : ""}`}
+                    Share link active · {shareAnalytics && `${shareAnalytics.views} views${shareAnalytics.selectedScenario ? ` · package selected: ${shareAnalytics.selectedScenario}` : ""}${shareAnalytics.lastViewedAt ? ` · last viewed ${new Date(shareAnalytics.lastViewedAt).toLocaleString()}` : ""}`}
                   </p>
+                  {!!shareAnalytics?.events?.length && (
+                    <details className="text-xs text-ink-muted font-mono">
+                      <summary className="cursor-pointer hover:text-ink-primary">View activity log</summary>
+                      <ul className="mt-2 space-y-1 tabular-nums">
+                        {shareAnalytics.events.map((ev, i) => (
+                          <li key={i}>
+                            {ev.type.replaceAll("_", " ")} — {new Date(ev.at).toLocaleString()}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                   <div className="flex flex-wrap items-center gap-2">
                     <a
                       href={`/share/${project.shareToken}`}
@@ -1619,10 +1919,11 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
 
       {/* STEP: WIN */}
       <div id="step-win">
-        <StepHeader stepKey="win" count={3} />
+        <StepHeader stepKey="win" count={winCount} />
         {expandedSteps.has("win") && (
           <div className="mt-2 space-y-6">
             {/* DEAL OS */}
+            {intelligenceMode === "full" && (
             <Card className="no-print border-border-hairline bg-surface-1 p-5">
               <div className="border-b border-border-hairline pb-2">
                 <h2 className="text-sm font-semibold text-ink-primary font-display">Deal-to-Profit OS (Deal Strategy Assistant)</h2>
@@ -1641,8 +1942,10 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 </pre>
               )}
             </Card>
+            )}
 
             {/* WIN PLAN */}
+            {intelligenceMode === "full" && (
             <Card className="no-print border-border-hairline bg-surface-1 p-5">
               <div className="border-b border-border-hairline pb-2">
                 <h2 className="text-sm font-semibold text-ink-primary font-display">Win Plan</h2>
@@ -1653,6 +1956,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 <Button
                   variant={project.data?.winPlan ? "secondary" : "primary"}
                   disabled={busy === `/api/projects/${id}/win-plan`}
+                  loading={busy === `/api/projects/${id}/win-plan`}
                   onClick={buildWinPlan}
                 >
                   {project.data?.winPlan ? "Refresh Win Plan" : "Build Win Plan"}
@@ -1778,8 +2082,10 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 <p className="mt-4 text-xs text-ink-muted">Build a win plan to surface buyer priorities, likely objections with responses, and a ranked list of next actions.</p>
               )}
             </Card>
+            )}
 
             {/* CLOSE COACH */}
+            {intelligenceMode === "full" && (
             <Card className="no-print border-border-hairline bg-surface-1 p-5">
               <div className="border-b border-border-hairline pb-2">
                 <h2 className="text-sm font-semibold text-ink-primary font-display">Close Coach</h2>
@@ -1790,6 +2096,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 <Button
                   variant={project.data?.closeCoach ? "secondary" : "primary"}
                   disabled={busy === `/api/projects/${id}/close-coach`}
+                  loading={busy === `/api/projects/${id}/close-coach`}
                   onClick={getClosingGuidance}
                 >
                   {project.data?.closeCoach ? "Refresh Closing Guidance" : "Get Closing Guidance"}
@@ -1848,13 +2155,14 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 </div>
               )}
             </Card>
+            )}
           </div>
         )}
       </div>
 
       {/* STEP: PROTECT */}
       <div id="step-protect">
-        <StepHeader stepKey="protect" count={4} />
+        <StepHeader stepKey="protect" count={protectCount} />
         {expandedSteps.has("protect") && (
           <div className="mt-2 space-y-6">
             {/* SCOPE BASELINE & CHANGE ORDERS */}
@@ -1948,7 +2256,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
               </div>
               <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <Label>Actual revenue ($)</Label>
+                  <Label>Actual revenue ({currencySymbol(currency)})</Label>
                   <Input
                     type="number"
                     min={0}
@@ -1959,7 +2267,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                   />
                 </div>
                 <div>
-                  <Label>Actual cost ($)</Label>
+                  <Label>Actual cost ({currencySymbol(currency)})</Label>
                   <Input
                     type="number"
                     min={0}
@@ -2005,6 +2313,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
             </Card>
 
             {/* COMMERCIAL AUTOPILOT */}
+            {intelligenceMode === "full" && (
             <Card className="no-print border-border-hairline bg-surface-1 p-5">
               <div className="border-b border-border-hairline pb-2">
                 <h2 className="text-sm font-semibold text-ink-primary font-display">Commercial Autopilot</h2>
@@ -2015,6 +2324,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 <Button
                   variant={autopilot ? "secondary" : "primary"}
                   disabled={busy === `/api/projects/${id}/commercial-autopilot`}
+                  loading={busy === `/api/projects/${id}/commercial-autopilot`}
                   onClick={runAutopilot}
                 >
                   {autopilot ? "Refresh Autopilot" : "Run Autopilot"}
@@ -2130,7 +2440,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                           <div key={i} className="rounded-[4px] border border-border-hairline bg-surface-2 p-3">
                             <div className="flex items-center justify-between">
                               <span className="text-sm font-medium text-ink-primary">{s.name}</span>
-                              <span className="font-mono text-sm text-ink-primary">${s.price.toLocaleString()}</span>
+                              <span className="font-mono text-sm text-ink-primary">{formatCurrency(s.price, currency)}</span>
                             </div>
                             <p className="mt-1 text-sm text-ink-secondary">{s.scopeTrade}</p>
                             <p className="mt-1 text-xs text-ink-muted">{s.marginImpact}</p>
@@ -2207,19 +2517,19 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                       <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs font-mono tabular-nums">
                         <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
                           <span className="text-ink-muted block text-[11px]">Quoted Value</span>
-                          <span className="font-semibold text-ink-primary">${Number(autopilot.profitability.quotedValue || 0).toLocaleString()}</span>
+                          <span className="font-semibold text-ink-primary">{formatCurrency(Number(autopilot.profitability.quotedValue || 0), currency)}</span>
                         </div>
                         <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
                           <span className="text-ink-muted block text-[11px]">Estimated Cost</span>
-                          <span className="font-semibold text-ink-primary">${Number(autopilot.profitability.estimatedCost || 0).toLocaleString()}</span>
+                          <span className="font-semibold text-ink-primary">{formatCurrency(Number(autopilot.profitability.estimatedCost || 0), currency)}</span>
                         </div>
                         <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
                           <span className="text-ink-muted block text-[11px]">Actual Cost</span>
-                          <span className="font-semibold text-ink-primary">${Number(autopilot.profitability.actualCost || 0).toLocaleString()}</span>
+                          <span className="font-semibold text-ink-primary">{formatCurrency(Number(autopilot.profitability.actualCost || 0), currency)}</span>
                         </div>
                         <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
                           <span className="text-ink-muted block text-[11px]">Forecast Cost</span>
-                          <span className="font-semibold text-ink-primary">${Number(autopilot.profitability.forecastCost || 0).toLocaleString()}</span>
+                          <span className="font-semibold text-ink-primary">{formatCurrency(Number(autopilot.profitability.forecastCost || 0), currency)}</span>
                         </div>
                         <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5">
                           <span className="text-ink-muted block text-[11px]">Estimated Margin</span>
@@ -2271,6 +2581,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 </div>
               )}
             </Card>
+            )}
 
             {/* REVISION HISTORY */}
             <Card className="no-print border-border-hairline bg-surface-1 p-5">

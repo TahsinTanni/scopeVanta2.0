@@ -11,7 +11,7 @@ type ShareData = { client: string; questions: Array<{ question: string; why?: st
 export const GET = withErrors(async (_req: Request, { params }: { params: Promise<{ token: string }> }) => {
   const { token } = await params;
   const s = await prisma.discoveryShare.findUnique({ where: { token } });
-  if (!s || s.token !== token || s.status === "revoked") return error("This discovery link is unavailable.", 404);
+  if (!s || s.token !== token || s.status === "revoked" || (s.expiresAt && s.expiresAt.getTime() < Date.now())) return error("This discovery link is unavailable.", 404);
   const d = s.data as ShareData;
   return json({ discovery: { client: d.client, questions: d.questions, status: s.status, submittedAt: d.submittedAt || "" } });
 });
@@ -20,7 +20,7 @@ export const POST = withErrors(async (req: Request, { params }: { params: Promis
   const { token } = await params;
   const b = (await req.json().catch(() => ({}))) as { name?: string; email?: string; answers?: string[] };
   const s = await prisma.discoveryShare.findUnique({ where: { token } });
-  if (!s || s.token !== token || s.status !== "open") return error("This discovery link is unavailable.", 404);
+  if (!s || s.token !== token || s.status !== "open" || (s.expiresAt && s.expiresAt.getTime() < Date.now())) return error("This discovery link is unavailable.", 404);
   const d = s.data as ShareData;
 
   const name = String(b.name || "").trim().slice(0, 200);

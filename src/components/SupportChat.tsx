@@ -82,6 +82,15 @@ export default function SupportChat() {
                 </div>
               </div>
             ))}
+            {sending && (
+              <div className="flex justify-start" aria-label="ScopeVanta Guide is typing">
+                <div className="flex items-center gap-1 rounded-[8px] bg-surface-2 px-3 py-2.5">
+                  {[0, 150, 300].map((delay) => (
+                    <span key={delay} className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-muted" style={{ animationDelay: `${delay}ms` }} />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="-mx-5 border-t border-border-hairline px-4 py-2">

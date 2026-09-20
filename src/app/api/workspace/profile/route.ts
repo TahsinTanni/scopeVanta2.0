@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth, requireRole } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
 import { billing } from "@/lib/billing";
+import { isSupportedCurrency } from "@/lib/currency";
 import { hasDevEntitlementBypass } from "@/lib/square";
 
 // GET/PUT /api/profile — legacy/backend/index.ts:862-923, split into the
@@ -25,6 +26,7 @@ type ProfileBody = {
   businessName?: string;
   expertise?: string;
   website?: string;
+  currency?: string;
   onboarded?: boolean;
 };
 
@@ -39,6 +41,7 @@ export const PUT = withErrors(async (req: Request) => {
   const email = String(b.contactEmail).trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return error("Enter a valid email address.", 400);
   if (String(b.contactName).trim().length < 2) return error("Enter your full name.", 400);
+  if (b.currency !== undefined && !isSupportedCurrency(b.currency)) return error("Choose a supported currency.", 400);
 
   const profile = await prisma.companyProfile.upsert({
     where: { workspaceId: ctx.workspaceId },
@@ -50,6 +53,7 @@ export const PUT = withErrors(async (req: Request) => {
       businessName: String(b.businessName).slice(0, 160),
       expertise: String(b.expertise).slice(0, 4000),
       website: String(b.website || "").slice(0, 500),
+      ...(b.currency ? { currency: b.currency } : {}),
       onboarded: Boolean(b.onboarded),
     },
     update: {
@@ -59,6 +63,7 @@ export const PUT = withErrors(async (req: Request) => {
       businessName: String(b.businessName).slice(0, 160),
       expertise: String(b.expertise).slice(0, 4000),
       website: String(b.website || "").slice(0, 500),
+      ...(b.currency ? { currency: b.currency } : {}),
       onboarded: Boolean(b.onboarded),
     },
   });

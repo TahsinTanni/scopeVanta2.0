@@ -18,11 +18,13 @@ export function Button({
   children,
   variant = "primary",
   className = "",
+  loading = false,
   ...props
 }: {
   children: ReactNode;
   variant?: "primary" | "secondary" | "ghost" | "danger";
   className?: string;
+  loading?: boolean;
 } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
   const base = "inline-flex items-center justify-center gap-2 rounded-[4px] px-3.5 py-1.5 text-xs font-semibold uppercase tracking-wider font-body transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
   const variants: Record<string, string> = {
@@ -36,7 +38,8 @@ export function Button({
     danger: "bg-danger/15 text-danger border border-danger/30 hover:bg-danger/25",
   };
   return (
-    <button className={`${base} ${variants[variant]} ${className}`} {...props}>
+    <button className={`${base} ${variants[variant]} ${className}`} {...props} disabled={props.disabled || loading} aria-busy={loading || undefined}>
+      {loading && <span aria-hidden="true" className="h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-transparent border-t-current" />}
       {children}
     </button>
   );
@@ -131,3 +134,98 @@ export function PageHeader({
   );
 }
 
+
+export function IconButton({
+  icon,
+  label,
+  onClick,
+  variant = "ghost",
+  className = "",
+  disabled = false,
+}: {
+  icon: string;
+  label: string;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  variant?: "ghost" | "danger";
+  className?: string;
+  disabled?: boolean;
+}) {
+  const variants = {
+    ghost: "text-ink-muted hover:bg-surface-3 hover:text-ink-primary",
+    danger: "text-danger hover:bg-danger/15",
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className={`rounded-[4px] p-1.5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${className}`}
+    >
+      <span aria-hidden="true" className="material-symbols-outlined text-[18px]">
+        {icon}
+      </span>
+    </button>
+  );
+}
+
+export function RadioCard({
+  selected,
+  onSelect,
+  title,
+  description,
+  children,
+}: {
+  selected: boolean;
+  onSelect: () => void;
+  title: string;
+  description?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div
+      role="radio"
+      aria-checked={selected}
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`cursor-pointer rounded-[8px] border p-4 outline-none transition-colors focus-visible:border-border-focus ${
+        selected ? "border-accent bg-accent/10" : "border-border-hairline bg-surface-2 hover:bg-surface-3"
+      }`}
+    >
+      <p className="text-sm font-medium text-ink-primary font-body">{title}</p>
+      {description && <p className="mt-1 text-xs text-ink-muted font-body">{description}</p>}
+      {children}
+    </div>
+  );
+}
+
+export function StatusBanner({
+  tone,
+  children,
+  className = "",
+}: {
+  tone: "danger" | "warning" | "success";
+  children: ReactNode;
+  className?: string;
+}) {
+  const tones = {
+    danger: "border-danger/30 bg-danger/10 text-danger",
+    warning: "border-warning/30 bg-warning/10 text-warning",
+    success: "border-success/30 bg-success/10 text-success",
+  };
+  return (
+    <p
+      role={tone === "danger" ? "alert" : "status"}
+      className={`rounded-[4px] border px-3 py-2 text-xs font-mono ${tones[tone]} ${className}`}
+    >
+      {children}
+    </p>
+  );
+}

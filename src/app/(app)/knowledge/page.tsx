@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Card, PageHeader, Button, Input, Select, Badge, EmptyState } from "@/components/ui";
 import { trackEvent } from "@/lib/track";
 
-type FileItem = { id: string; name: string; status: string; extractedChars: number; error?: string; documentType?: string; summary?: string };
+type FileItem = { id: string; name: string; status: string; extractedChars: number; error?: string; truncated?: boolean; documentType?: string; summary?: string };
 type KnowledgeRecord = {
   id: string;
   category: string;
@@ -100,7 +100,7 @@ export default function KnowledgePage() {
         }
       />
       {error && (
-        <div className="rounded-[4px] border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-xs text-status-danger font-mono">
+        <div className="rounded-[4px] border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger font-mono">
           {error}
         </div>
       )}
@@ -137,12 +137,18 @@ export default function KnowledgePage() {
                   <p className="text-sm font-medium text-ink-primary">{f.name}</p>
                   <p className="text-xs text-ink-muted font-mono tabular-nums">
                     {f.documentType || f.status} · {f.extractedChars} chars{f.error ? ` · ${f.error}` : ""}
+                    {f.truncated && f.status === "ready" ? " · Only the first 30,000 characters were processed." : ""}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge tone={f.status === "ready" ? "success" : f.status === "failed" ? "danger" : "neutral"}>
                     {f.status}
                   </Badge>
+                  {f.truncated && f.status === "ready" && (
+                    <span title="Only the first 30,000 characters were processed.">
+                      <Badge tone="warning">Truncated</Badge>
+                    </span>
+                  )}
                   <Button variant="secondary" className="text-xs py-1 px-2.5" onClick={() => reprocess(f.id)}>
                     Reprocess
                   </Button>

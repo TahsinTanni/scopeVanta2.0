@@ -2,13 +2,18 @@ import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, withErrors } from "@/lib/http";
 import { projectData } from "@/lib/project-data";
+import { billing } from "@/lib/billing";
+import { hasDevEntitlementBypass } from "@/lib/square";
 
 // GET /api/dashboard/intelligence — legacy/backend/index.ts:1914-2128.
 export const GET = withErrors(async () => {
   const ctx = await requireWorkspaceAuth();
-  const [projects, clients] = await Promise.all([
+  const [projects, clients, companyProfile, knowledgeFileCount, subscription] = await Promise.all([
     prisma.project.findMany({ where: { workspaceId: ctx.workspaceId }, take: 160 }),
     prisma.client.findMany({ where: { workspaceId: ctx.workspaceId }, take: 100 }),
+    prisma.companyProfile.findUnique({ where: { workspaceId: ctx.workspaceId } }),
+    prisma.knowledgeFile.count({ where: { workspaceId: ctx.workspaceId } }),
+    prisma.billingSubscription.findUnique({ where: { workspaceId: ctx.workspaceId } }),
   ]);
 
   const now = new Date();
@@ -119,6 +124,15 @@ export const GET = withErrors(async () => {
     month: { proposals: current.length, previousProposals: previous.length, averageRisk: avg(current), previousAverageRisk: avg(previous) },
     riskDistribution,
     statusCounts,
+    currency: companyProfile?.currency || "USD",
+    activation: {
+      companyProfile: !!companyProfile,
+      knowledgeSource: knowledgeFileCount > 0,
+      clientContext: clients.length > 0,
+      firstProposal: projects.length > 0,
+      // Same billing() logic as /api/billing/status, so dev bypass counts as activated.
+      subscription: !billing(subscription, hasDevEntitlementBypass()).requiresAction,
+    },
     trend,
     topRisk,
     commercialPerformance,

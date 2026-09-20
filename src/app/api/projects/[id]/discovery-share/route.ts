@@ -15,16 +15,23 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
   if (!questions.length) return error("Run Discovery Agent before creating a client discovery link.", 400);
 
   const token = `d${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`;
-  await prisma.discoveryShare.create({
-    data: {
-      workspaceId: ctx.workspaceId,
-      projectId: id,
-      token,
-      status: "open",
-      createdByUserId: ctx.userId,
-      data: { client: p.clientLabel || "Client", questions, answers: [] } as object,
-    },
-  });
+  const now = new Date();
+  // Supersede every earlier live link for this project, then create the new one, atomically —
+  // a failed create must not leave the project with all of its links revoked.
+  await prisma.$transaction([
+    prisma.discoveryShare.updateMany({ where: { projectId: id, status: { not: "revoked" } }, data: { status: "revoked", revokedAt: now } }),
+    prisma.discoveryShare.create({
+      data: {
+        workspaceId: ctx.workspaceId,
+        projectId: id,
+        token,
+        status: "open",
+        createdByUserId: ctx.userId,
+        expiresAt: new Date(now.getTime() + 30 * 86_400_000),
+        data: { client: p.clientLabel || "Client", questions, answers: [] } as object,
+      },
+    }),
+  ]);
   const updated = await prisma.project.update({ where: { id }, data: { discoveryShareToken: token, data: { ...d, discoveryShareStatus: "open" } as object } });
   return json({ token, project: updated });
 });
