@@ -13,7 +13,7 @@ export const GET = withErrors(async (_req: Request, { params }: { params: Promis
   const { token } = await params;
   if (!token) return error("Share link is invalid.", 400);
   const s = await prisma.proposalShare.findUnique({ where: { token } });
-  if (!s || s.token !== token || s.status === "revoked" || (s.expiresAt && s.expiresAt.getTime() < Date.now())) return error("This proposal link is unavailable.", 404);
+  if (!s || s.token !== token || s.status === "revoked" || (s.expiresAt && s.status !== "accepted" && s.status !== "changes_requested" && s.expiresAt.getTime() < Date.now())) return error("This proposal link is unavailable.", 404);
   const d = s.data as ShareData;
 
   const viewedAt = new Date().toISOString();
@@ -45,6 +45,9 @@ export const GET = withErrors(async (_req: Request, { params }: { params: Promis
       responsibilities: d.responsibilities || [],
       handoff: d.handoff || {},
       views,
+      releaseId: s.releaseId || "",
+      releaseHash: s.releaseHash || "",
+      releasedAt: s.releasedAt?.toISOString() || "",
     },
   });
 });

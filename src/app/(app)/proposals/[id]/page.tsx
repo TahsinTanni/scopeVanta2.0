@@ -121,6 +121,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   const [shareAnalytics, setShareAnalytics] = useState<{
     views: number; lastViewedAt: string; selectedScenario: string;
     decision?: string; decisionNote?: string; decisionName?: string; decisionEmail?: string; decidedAt?: string;
+    releaseId?: string; releaseHash?: string;
     events?: Array<{ type: string; at: string; name?: string }>;
   } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -1869,6 +1870,12 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                   <p className="text-xs text-ink-muted font-mono tabular-nums">
                     Share link active · {shareAnalytics && `${shareAnalytics.views} views${shareAnalytics.selectedScenario ? ` · package selected: ${shareAnalytics.selectedScenario}` : ""}${shareAnalytics.lastViewedAt ? ` · last viewed ${new Date(shareAnalytics.lastViewedAt).toLocaleString()}` : ""}`}
                   </p>
+                  {shareAnalytics?.releaseId && (
+                    <p className="text-[11px] text-ink-muted font-mono tabular-nums break-all">
+                      Release {shareAnalytics.releaseId}
+                      {shareAnalytics.releaseHash ? ` · SHA-256 ${shareAnalytics.releaseHash.slice(0, 12)}…${shareAnalytics.releaseHash.slice(-8)}` : ""}
+                    </p>
+                  )}
                   {!!shareAnalytics?.events?.length && (
                     <details className="text-xs text-ink-muted font-mono">
                       <summary className="cursor-pointer hover:text-ink-primary">View activity log</summary>

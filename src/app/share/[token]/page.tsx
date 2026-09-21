@@ -11,6 +11,7 @@ type ShareView = {
   client: string; seller: string; proposal: string; version: number; dealValue: number; currency: string; status: string; decision: string;
   selectedScenario: string; scopeSummary: Array<{ name: string; qty: number; hours: number; acceptance: string }>;
   scenarios: Array<{ name: string; price: number; hours: number; marginPct: number }>; timeline: string; views: number;
+  releaseId?: string; releaseHash?: string; releasedAt?: string;
 };
 
 export default function PublicSharePage({ params }: { params: Promise<{ token: string }> }) {
@@ -148,6 +149,22 @@ export default function PublicSharePage({ params }: { params: Promise<{ token: s
             <div className="mt-5 flex gap-2">
               <Button disabled={busy} onClick={() => decide("accepted")}>Accept proposal</Button>
               <Button variant="secondary" disabled={busy} onClick={() => decide("changes_requested")}>Request changes</Button>
+            </div>
+          </Card>
+        )}
+
+        {share.releaseId && (
+          <Card className="border-border-hairline bg-surface-1/90 backdrop-blur-sm p-5">
+            <h2 className="text-sm font-semibold text-ink-primary">Proposal Release</h2>
+            <p className="mt-2 text-xs text-ink-muted font-mono tabular-nums break-all">Release ID: {share.releaseId}</p>
+            {share.releaseHash && (
+              <p className="mt-1 text-xs text-ink-muted font-mono tabular-nums">
+                SHA-256: {share.releaseHash.slice(0, 12)}…{share.releaseHash.slice(-8)}
+              </p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-4 text-xs">
+              <a href={`/api/proposal-share/${token}/receipt.pdf`} className="text-accent hover:text-accent-hover underline">Download PDF Certificate</a>
+              <a href={`/api/proposal-share/${token}/receipt.json`} className="text-accent hover:text-accent-hover underline">Download JSON Receipt</a>
             </div>
           </Card>
         )}

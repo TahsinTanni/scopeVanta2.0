@@ -19,6 +19,8 @@ export const GET = withErrors(async (_req: Request, { params }: { params: Promis
     lastViewedAt: String(d.lastViewedAt || ""),
     selectedScenario: String(d.selectedScenario || ""),
     decision: String(d.decision || ""),
+    releaseId: s?.releaseId || "",
+    releaseHash: s?.releaseHash || "",
     decisionNote: String(d.decisionNote || ""),
     decisionName: String(d.decisionName || ""),
     decisionEmail: String(d.decisionEmail || ""),
