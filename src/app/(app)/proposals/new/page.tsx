@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, PageHeader, Button, Input, Textarea, Label, Select } from "@/components/ui";
 import { trackEvent } from "@/lib/track";
+import { AIProgress } from "@/components/AIProgress";
 
 type ClientOption = { id: string; name: string };
 
@@ -209,22 +210,25 @@ export default function NewProposalPage() {
             {error}
           </div>
         )}
-        <div className="mt-6 flex items-center justify-between">
-          <Button
-            disabled={busy || brief.trim().length < 40 || selectedSections.length === 0}
-            loading={busy}
-            onClick={generate}
-            className="flex items-center gap-2"
-          >
-            {busy ? (
-              <>{uploadingReference ? "Uploading reference…" : "Analyzing Scope…"}</>
-            ) : (
-              <>
-                <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
-                Generate proposal
-              </>
-            )}
-          </Button>
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col items-start gap-2">
+            <Button
+              disabled={busy || brief.trim().length < 40 || selectedSections.length === 0}
+              loading={busy}
+              onClick={generate}
+              className="flex items-center gap-2"
+            >
+              {busy ? (
+                <>{uploadingReference ? "Uploading reference…" : "Analyzing Scope…"}</>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-[16px]">auto_awesome</span>
+                  Generate proposal
+                </>
+              )}
+            </Button>
+            <AIProgress active={busy} durationMs={13000} label="Generating proposal" />
+          </div>
           <div className="text-right space-y-0.5">
             {brief.trim().length > 0 && brief.trim().length < 40 && (
               <p className="text-xs text-ink-muted">Add at least {40 - brief.trim().length} more characters to brief.</p>

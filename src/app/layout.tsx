@@ -33,12 +33,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <ClerkProvider>
       <html
         lang="en"
+        suppressHydrationWarning
         className={`${newsreader.variable} ${manrope.variable} ${jetbrainsMono.variable} dark h-full antialiased`}
       >
         <head>
           <link
             rel="stylesheet"
             href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+          />
+          {/* Resolves system/light/dark before first paint so there is no flash of the wrong theme. */}
+          <script
+            dangerouslySetInnerHTML={{
+              __html: `(function(){try{var m=localStorage.getItem("scopevanta:theme");var d=m==="dark"||(m!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d);}catch(e){}})();`,
+            }}
           />
         </head>
         <body suppressHydrationWarning className="min-h-full flex flex-col bg-surface-0 text-ink-primary font-body">

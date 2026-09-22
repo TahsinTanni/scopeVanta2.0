@@ -99,17 +99,17 @@ export default function ProposalsPage() {
         }
       />
       {error && <StatusBanner tone="danger">{error}</StatusBanner>}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-[200px] flex-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="w-full sm:min-w-[200px] sm:flex-1">
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by client…" aria-label="Search proposals by client" />
         </div>
-        <div className="w-44">
+        <div className="w-full sm:w-44">
           <Select value={stage} onChange={(e) => { setStage(e.target.value); setPage(1); }} aria-label="Filter by stage">
             <option value="all">All Stages</option>
             {DEAL_STAGES.map((s) => <option key={s} value={s}>{s}</option>)}
           </Select>
         </div>
-        <div className="w-48">
+        <div className="w-full sm:w-48">
           <Select value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} aria-label="Sort proposals">
             {SORT_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </Select>
@@ -125,16 +125,16 @@ export default function ProposalsPage() {
         <div className="space-y-2">
           {projects.map((p) => (
             <Link key={p.id} href={`/proposals/${p.id}`} className="block group">
-              <Card className="flex items-center justify-between border-border-hairline bg-surface-1 hover:bg-surface-2 transition-colors py-3.5 px-4">
-                <div className="space-y-0.5">
-                  <p className="text-sm font-medium text-ink-primary group-hover:text-accent transition-colors">
+              <Card className="flex flex-col gap-2 border-border-hairline bg-surface-1 hover:bg-surface-2 transition-colors py-3.5 px-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0 space-y-0.5">
+                  <p className="truncate text-sm font-medium text-ink-primary group-hover:text-accent transition-colors">
                     {p.clientLabel || "Untitled opportunity"}
                   </p>
                   <p className="text-xs text-ink-muted font-mono tabular-nums">
                     {new Date(p.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <Badge tone="neutral">{p.dealStage}</Badge>
                   {p.riskScore != null && (
                     <Badge tone={p.riskScore >= 70 ? "danger" : p.riskScore >= 40 ? "warning" : "success"}>

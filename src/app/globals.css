@@ -1,9 +1,57 @@
 @import "tailwindcss";
 
 /* ==========================================================================
-   Design tokens — "Forest Slate & Pale Linen" (Dark Native)
+   Design tokens — "Forest Slate & Pale Linen"
+   :root holds the light ("Pale Linen") values; .dark overrides them with the
+   original dark-native values. The three-state system/light/dark toggle
+   (ThemeToggle.tsx) only ever adds/removes the .dark class on <html> — it
+   never introduces a third selector, so this stays a simple override.
    ========================================================================== */
-:root, .dark {
+:root {
+  /* Surfaces */
+  --surface-0: #F6F4EF;   /* canvas / page background */
+  --surface-1: #FDFCFA;   /* nav rails, recessed wells */
+  --surface-2: #FFFFFF;   /* cards, panels (default) */
+  --surface-3: #EFEBE2;   /* hover states, popovers, tooltips */
+  --surface-4: #E9E4D8;   /* modals, drawers */
+
+  /* Borders */
+  --border-hairline: #E1DCD0;   /* universal 1px border */
+  --border-subtle: #EBE7DC;     /* internal cell/table row dividers */
+  --border-focus: #3D7A61;      /* focus ring / active border */
+
+  /* Text */
+  --text-primary: #1B231F;
+  --text-secondary: #33403A;
+  --text-muted: #647069;
+  --text-disabled: #A6AFA9;
+
+  /* Accent (primary brand color = forest sage green) */
+  --accent: #3D7A61;          /* buttons, active states, key metrics */
+  --accent-hover: #35694F;    /* hover */
+  --accent-pressed: #2B5540;  /* active/pressed, tinted badge bg at 15-20% opacity */
+  --accent-rgb: 61, 122, 97;  /* for rgba()/glow props that need raw channels */
+
+  /* Semantic */
+  --danger: #A03E3E;
+  --warning: #8A7126;
+  --info: #4E655D;
+
+  /* Backward-compatible aliasing */
+  --background: var(--surface-0);
+  --surface: var(--surface-2);
+  --surface-raised: var(--surface-1);
+  --border: var(--border-hairline);
+  --foreground: var(--text-primary);
+  --foreground-muted: var(--text-muted);
+  --foreground-subtle: var(--text-disabled);
+  --accent-foreground: #F3FBF7;
+  --success: #3D7A61;
+
+  color-scheme: light;
+}
+
+.dark {
   /* Surfaces */
   --surface-0: #0E1312;   /* canvas / page background */
   --surface-1: #111715;   /* nav rails, recessed wells */
@@ -43,6 +91,8 @@
   --foreground-subtle: var(--text-disabled);
   --accent-foreground: #002116;
   --success: #4E8770;
+
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -92,7 +142,7 @@
 }
 
 html {
-  color-scheme: dark;
+  /* color-scheme is set per-theme in the :root/.dark blocks above. */
   /* Slight global scale-up — every rem-based text/spacing size in the app
      (Tailwind's entire scale is rem-based) grows proportionally from this
      one line, instead of editing each page's classNames individually. */
@@ -135,6 +185,25 @@ body {
   direction: ltr;
   -webkit-font-feature-settings: 'liga';
   -webkit-font-smoothing: antialiased;
+}
+
+/* Shared entrance motion — kept small/short so it reads as state-change
+   feedback, not decoration. Used by Dialog (backdrop + panel). */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 @media print {

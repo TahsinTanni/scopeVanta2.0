@@ -133,7 +133,7 @@ export default function PublicSharePage({ params }: { params: Promise<{ token: s
         ) : (
           <Card className="border-border-hairline bg-surface-1/90 backdrop-blur-sm p-6">
             <h2 className="text-sm font-semibold text-ink-primary mb-3">Authorize or Request Revisions</h2>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div><Label>Your name</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
               <div><Label>Your email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
             </div>

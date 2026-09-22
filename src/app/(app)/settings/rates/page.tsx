@@ -166,7 +166,7 @@ export default function RatesPage() {
       {error && <StatusBanner tone="danger">{error}</StatusBanner>}
 
       <Card className="border-border-hairline bg-surface-1 p-5">
-        <form onSubmit={onSubmit} className="grid grid-cols-4 gap-4 items-end">
+        <form onSubmit={onSubmit} className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 items-end">
           <div>
             <Label>Role / service name</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
@@ -210,7 +210,7 @@ export default function RatesPage() {
             if (r.id === editingId) {
               return (
                 <Card key={r.id} className="border-border-hairline bg-surface-1 p-4">
-                  <div className="grid grid-cols-4 gap-4 items-end">
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 items-end">
                     <div>
                       <Label>Role / service name</Label>
                       <Input value={editName} onChange={(e) => setEditName(e.target.value)} />

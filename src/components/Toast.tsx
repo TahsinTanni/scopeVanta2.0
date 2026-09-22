@@ -49,7 +49,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
           <div
             key={t.id}
             role={t.tone === "error" ? "alert" : "status"}
-            className={`flex min-w-[220px] max-w-sm items-start gap-3 rounded-[4px] border border-border-hairline border-l-4 bg-surface-2 px-3.5 py-2.5 text-sm text-ink-primary ${
+            className={`flex min-w-[220px] max-w-sm items-start gap-3 rounded-[4px] border border-border-hairline border-l-4 bg-surface-2 px-3.5 py-2.5 text-sm text-ink-primary shadow-lg animate-[dialog-in_150ms_ease-out] ${
               t.tone === "success" ? "border-l-success" : "border-l-danger"
             }`}
           >

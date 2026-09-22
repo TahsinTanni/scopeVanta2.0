@@ -77,7 +77,7 @@ export function Dialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 no-print overflow-y-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 no-print overflow-y-auto animate-[fade-in_150ms_ease-out]"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -88,7 +88,7 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
         tabIndex={-1}
-        className={`flex flex-col w-full max-h-[92vh] rounded-[12px] bg-surface-1 border border-border-hairline shadow-2xl overflow-hidden outline-none ${className}`}
+        className={`flex flex-col w-full max-h-[92vh] rounded-[12px] bg-surface-1 border border-border-hairline shadow-2xl overflow-hidden outline-none animate-[dialog-in_150ms_ease-out] ${className}`}
       >
         {title && (
           <h2 id={titleId} className="sr-only">

@@ -51,7 +51,7 @@ export default function DiscoveryPage({ params }: { params: Promise<{ token: str
     <div className="min-h-screen bg-background px-4 py-12">
       <Card className="mx-auto max-w-lg">
         <h1 className="text-lg font-semibold text-foreground">A few quick questions from {discovery.client}</h1>
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div><Label>Your name</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div><Label>Your email</Label><Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
         </div>

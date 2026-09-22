@@ -8,6 +8,7 @@ import { trackEvent } from "@/lib/track";
 import { useToast } from "@/components/Toast";
 import { DEAL_STAGES } from "@/lib/deal-stages";
 import { formatCurrency, currencySymbol } from "@/lib/currency";
+import { AIProgress } from "@/components/AIProgress";
 import { useNavigationGuard } from "@/components/NavigationGuard";
 
 type Project = {
@@ -645,7 +646,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
   }
 
   return (
-    <div className="max-w-6xl space-y-6 print:max-w-none print:space-y-4">
+    <div className="space-y-6 print:space-y-4">
       {/* Top action & status bar */}
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border-hairline pb-5 no-print">
         <div>
@@ -1061,7 +1062,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
       {readiness && (
         <Card className="no-print border-border-hairline bg-surface-1 p-5">
           <h2 className="text-sm font-semibold text-ink-primary font-display">Commercial Readiness</h2>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-mono">
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 text-xs font-mono">
             {readiness.checks.map((c) => (
               <div key={c.label} className="flex items-center gap-2">
                 <span className={c.pass ? "text-success font-bold" : "text-ink-muted"}>
@@ -1162,9 +1163,12 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                     </div>
                   ))}
                 </div>
-                <Button className="mt-4" disabled={busy === `/api/projects/${id}/refine`} onClick={refine}>
-                  Refine & Regenerate Proposal
-                </Button>
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <Button disabled={busy === `/api/projects/${id}/refine`} loading={busy === `/api/projects/${id}/refine`} onClick={refine}>
+                    Refine & Regenerate Proposal
+                  </Button>
+                  <AIProgress active={busy === `/api/projects/${id}/refine`} durationMs={10000} label="Refining" />
+                </div>
               </Card>
             )}
 
@@ -1447,6 +1451,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 <Button disabled={busy === `/api/projects/${id}/scope-economics`} loading={busy === `/api/projects/${id}/scope-economics`} onClick={calculateEconomics}>
                   Calculate Packages
                 </Button>
+                <AIProgress active={busy === `/api/projects/${id}/scope-economics`} durationMs={5000} label="Calculating" />
               </div>
 
               {!!scenarios.length && (
@@ -1470,9 +1475,12 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                   <h2 className="text-sm font-semibold text-ink-primary font-display">Opportunity Lab (Commercial Intelligence)</h2>
                   <p className="text-xs text-ink-muted">AI scope diagnosis: unpriced work, margin firewall, and feasibility checks.</p>
                 </div>
-                <Button variant="secondary" disabled={busy === `/api/projects/${id}/commercial-lab`} loading={busy === `/api/projects/${id}/commercial-lab`} onClick={runCommercialLab}>
-                  Recalculate
-                </Button>
+                <div className="flex flex-col items-end gap-1.5">
+                  <Button variant="secondary" disabled={busy === `/api/projects/${id}/commercial-lab`} loading={busy === `/api/projects/${id}/commercial-lab`} onClick={runCommercialLab}>
+                    Recalculate
+                  </Button>
+                  <AIProgress active={busy === `/api/projects/${id}/commercial-lab`} durationMs={7000} label="Analyzing" />
+                </div>
               </div>
               <div className="mt-4">
                 <Label>New client request / scope change (optional)</Label>
@@ -1642,10 +1650,11 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 <Select value={studioAction} onChange={(e) => setStudioAction(e.target.value)} className="w-56 text-xs">
                   {STUDIO_ACTIONS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
                 </Select>
-                <Button disabled={busy === `/api/projects/${id}/proposal-studio`} onClick={runProposalStudio}>
+                <Button disabled={busy === `/api/projects/${id}/proposal-studio`} loading={busy === `/api/projects/${id}/proposal-studio`} onClick={runProposalStudio}>
                   Run Proposal Studio
                 </Button>
               </div>
+              <AIProgress active={busy === `/api/projects/${id}/proposal-studio`} durationMs={8000} label="Studio working" />
               <div className="mt-3">
                 <Label>Meeting notes, objection, or context (used by Meeting Update, Objection Workspace, and Follow-up Draft)</Label>
                 <Textarea rows={3} value={studioInput} onChange={(e) => setStudioInput(e.target.value)} />
@@ -1693,7 +1702,7 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
 
               {!!studio && studioShape === "coverage" && (
                 <div className="mt-4 space-y-3">
-                  <div className="grid grid-cols-3 gap-2 text-xs font-mono tabular-nums">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 text-xs font-mono tabular-nums">
                     <div className="rounded-[4px] border border-border-hairline bg-surface-2 p-2.5 text-center">
                       <span className="text-ink-muted block text-[11px]">Covered</span>
                       <span className="font-semibold text-success">{studio.covered}</span>
@@ -1941,8 +1950,9 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                   {DEAL_OS_ACTIONS.map((a) => <option key={a} value={a}>{a}</option>)}
                 </Select>
                 <Input placeholder="Optional input (client objection, meeting notes, change request…)" value={dealOSInput} onChange={(e) => setDealOSInput(e.target.value)} />
-                <Button disabled={busy === `/api/projects/${id}/deal-os`} onClick={runDealOS}>Run</Button>
+                <Button disabled={busy === `/api/projects/${id}/deal-os`} loading={busy === `/api/projects/${id}/deal-os`} onClick={runDealOS}>Run</Button>
               </div>
+              <AIProgress active={busy === `/api/projects/${id}/deal-os`} durationMs={9000} label="Deal OS working" />
               {!!dealOSResult && (
                 <pre className="mt-3 max-h-80 overflow-auto rounded-[4px] border border-border-hairline bg-surface-2 p-3.5 font-mono text-xs text-ink-secondary">
                   {JSON.stringify(dealOSResult, null, 2)}
@@ -1968,6 +1978,9 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 >
                   {project.data?.winPlan ? "Refresh Win Plan" : "Build Win Plan"}
                 </Button>
+                <div className="mt-2">
+                  <AIProgress active={busy === `/api/projects/${id}/win-plan`} durationMs={6000} label="Building win plan" />
+                </div>
               </div>
 
               {project.data?.winPlan ? (
@@ -2108,6 +2121,9 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 >
                   {project.data?.closeCoach ? "Refresh Closing Guidance" : "Get Closing Guidance"}
                 </Button>
+                <div className="mt-2">
+                  <AIProgress active={busy === `/api/projects/${id}/close-coach`} durationMs={4000} label="Coaching" />
+                </div>
               </div>
 
               {!!project.data?.closeCoach && (
@@ -2336,6 +2352,9 @@ export default function ProposalWorkspacePage({ params }: { params: Promise<{ id
                 >
                   {autopilot ? "Refresh Autopilot" : "Run Autopilot"}
                 </Button>
+                <div className="mt-2">
+                  <AIProgress active={busy === `/api/projects/${id}/commercial-autopilot`} durationMs={7000} label="Running autopilot" />
+                </div>
               </div>
 
               {!autopilot && (
