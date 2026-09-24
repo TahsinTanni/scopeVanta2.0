@@ -2,6 +2,8 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
 const isPublicRoute = createRouteMatcher([
   "/",
+  // Social-share card for the landing page; crawlers fetch it unauthenticated.
+  "/opengraph-image(.*)",
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/_healthcheck",

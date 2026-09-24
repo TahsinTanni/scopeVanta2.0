@@ -24,6 +24,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  // Absolute base for Open Graph/Twitter image URLs; falls back to Next's
+  // default (localhost / Vercel URL) when the env var isn't set.
+  ...(process.env.NEXT_PUBLIC_APP_URL ? { metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL) } : {}),
   title: "ScopeVanta",
   description: "Commercial intelligence for service businesses.",
 };
@@ -41,10 +44,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             rel="stylesheet"
             href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
           />
-          {/* Resolves system/light/dark before first paint so there is no flash of the wrong theme. */}
+          {/* Resolves system/light/dark before first paint so there is no flash of the wrong theme.
+              The landing page ("/") is always dark — see LandingPage.tsx. */}
           <script
             dangerouslySetInnerHTML={{
-              __html: `(function(){try{var m=localStorage.getItem("scopevanta:theme");var d=m==="dark"||(m!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d);}catch(e){}})();`,
+              __html: `(function(){try{var m=localStorage.getItem("scopevanta:theme");var d=location.pathname==="/"||m==="dark"||(m!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d);}catch(e){}})();`,
             }}
           />
         </head>

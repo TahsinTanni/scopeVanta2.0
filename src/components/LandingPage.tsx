@@ -1,17 +1,15 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { BentoCard, BentoCardGrid, GlobalSpotlight } from "@/components/MagicBento";
-import ThemeToggle from "@/components/ThemeToggle";
+import { ALL_PLAN_FEATURES, PLANS, PLAN_CURRENCY, TRIAL_DAYS } from "@/lib/plans";
 
 // ---------------------------------------------------------------------------
-// Real content only. Nothing below is fabricated — feature copy, workflow
-// step labels and pricing are the same data used elsewhere in the app
-// (settings/billing/page.tsx's PLANS mirrors these exact prices/tiers). No
-// testimonials, customer logos or usage stats exist anywhere in this
-// codebase, so none are shown here — see the report for what was omitted
-// rather than invented.
+// Real content only. Feature copy describes capabilities that exist in the
+// app; plan prices, limits and the trial length come from lib/plans.ts, the
+// same module checkout and the billing settings page use. No testimonials,
+// customer logos or usage stats exist yet, so none are shown.
 // ---------------------------------------------------------------------------
 
 const FEATURES = [
@@ -53,54 +51,28 @@ const FEATURES = [
   }
 ];
 
-const TIERS = [
+// Answers must stay true to the code: see lib/plans.ts for what differs by plan.
+const FAQS = [
   {
-    name: "Freelancer",
-    price: "$19",
-    cadence: "/month",
-    description: "For independent operators & specialized consultants managing focused high-stakes bids.",
-    features: [
-      "Up to 10 active proposals",
-      "Core AI brief analysis & risk scoring",
-      "Executive buyer share links",
-      "Standard PDF export",
-      "1 workspace seat"
-    ],
-    popular: false,
-    cta: "Start Free Trial"
+    q: "How does pricing work?",
+    a: `One flat monthly price per workspace, in ${PLAN_CURRENCY}, billed through Square. Plans differ only in how many new proposals you can create each month — every feature is included on every plan.`,
   },
   {
-    name: "Pro",
-    price: "$49",
-    cadence: "/month",
-    description: "For boutique consultancies & growing teams actively closing weekly pipeline.",
-    features: [
-      "Up to 40 active proposals",
-      "Full Contract Red-Teaming engine",
-      "Scope Margin Guard & fee modeling",
-      "Multi-document knowledge grounding",
-      "Priority customer support",
-      "Up to 5 workspace seats"
-    ],
-    popular: true,
-    cta: "Choose Pro Tier"
+    q: "Is there a free trial?",
+    a: `Yes. Your first ${TRIAL_DAYS} days are free. You set up your subscription through Square's secure checkout, and billing starts when the trial ends.`,
   },
   {
-    name: "Agency",
-    price: "$99",
-    cadence: "/month",
-    description: "For high-velocity service organizations demanding total commercial deal governance.",
-    features: [
-      "Up to 150 active proposals",
-      "Unlimited team workspace seats",
-      "Custom branded buyer portals",
-      "Dedicated Square payment reconciliation",
-      "Full revision ledger & audit history",
-      "Direct commercial strategy advisor"
-    ],
-    popular: false,
-    cta: "Choose Agency Tier"
-  }
+    q: "What counts toward my monthly proposal limit?",
+    a: "Each new proposal you create in a calendar month. The count resets on the 1st, and you can move to a larger plan at any time if you need more.",
+  },
+  {
+    q: "Can I change plans later?",
+    a: "Yes. The workspace owner can switch plans from Plan & billing in settings.",
+  },
+  {
+    q: "What do my clients see?",
+    a: "A private share link to the proposal's deal room, where they can review the scope, choose a package, and accept or request changes. They don't need an account.",
+  },
 ];
 
 // Each card describes a real, already-built capability — rephrased from
@@ -141,9 +113,30 @@ const CAROUSEL_CARDS = [
 
 const SECTION_NAV = [
   { id: "features", label: "Features" },
-  { id: "capabilities", label: "Capabilities" },
+  { id: "capabilities", label: "What it actually does" },
   { id: "pricing", label: "Pricing" },
+  { id: "faq", label: "FAQ" },
 ];
+
+// The landing page is always dark and has no theme toggle. The wrapper's
+// `dark` class handles the page itself; this also darkens <html> so the
+// scrollbar and overscroll area match, then restores the visitor's saved
+// preference (same logic as the root layout's theme-init script) when they
+// navigate into sign-in or the app.
+function useForcedDarkDocument() {
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.add("dark");
+    return () => {
+      let dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      try {
+        const saved = localStorage.getItem("scopevanta:theme");
+        if (saved === "dark" || saved === "light") dark = saved === "dark";
+      } catch {}
+      root.classList.toggle("dark", dark);
+    };
+  }, []);
+}
 
 function usePrefersReducedMotion() {
   const [reduced, setReduced] = useState(false);
@@ -600,7 +593,7 @@ function CardMarquee({ reduced }: { reduced: boolean }) {
         {cards.map((card, i) => (
           <div
             key={`${card.title}-${i}`}
-            className="flex w-[340px] shrink-0 flex-col rounded-[16px] border border-border-hairline bg-surface-1 p-7 shadow-xl"
+            className="flex aspect-square w-[340px] shrink-0 flex-col rounded-[16px] border border-border-hairline bg-surface-1 p-7 shadow-xl"
           >
             <span className="material-symbols-outlined text-[28px] text-accent">{card.icon}</span>
             <h3 className="mt-4 font-display text-xl font-medium leading-snug text-ink-primary tracking-tight">{card.title}</h3>
@@ -614,31 +607,57 @@ function CardMarquee({ reduced }: { reduced: boolean }) {
 
 const PRIMARY_CTA = "inline-flex items-center justify-center gap-2 rounded-full bg-accent px-6 py-3 text-xs font-semibold uppercase tracking-wider text-[#002116] hover:bg-accent-hover active:bg-accent-pressed transition-all shadow-[0_4px_20px_rgba(var(--accent-rgb),0.35)]";
 const SECONDARY_CTA = "inline-flex items-center justify-center gap-2 rounded-full border border-border-hairline bg-surface-1/80 px-6 py-3 text-xs font-semibold uppercase tracking-wider text-ink-secondary hover:bg-surface-2 hover:text-ink-primary transition-all";
+const TRIAL_CTA = `Start ${TRIAL_DAYS}-day free trial`;
+
+// Hero entrance runs as a pure CSS animation from the server-rendered HTML,
+// so the headline is visible without waiting for JavaScript to hydrate.
+// (The previous version held it at opacity 0 until a client-side mount flag
+// flipped, which delayed the page's largest paint.)
+const LOCAL_CSS = `
+  @keyframes sv-rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .sv-rise { animation: sv-rise 600ms ease-out both; }
+  @keyframes sv-marquee {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sv-rise { animation: none; }
+  }
+`;
+
+function SectionHeading({ eyebrow, title, subtitle, reduced }: { eyebrow: string; title: string; subtitle?: string; reduced: boolean }) {
+  return (
+    <Reveal reduced={reduced} className="mb-12 text-center">
+      <p className="text-xs font-mono uppercase tracking-wider text-accent-hover mb-2">{eyebrow}</p>
+      <h2 className="font-display text-3xl sm:text-4xl font-normal text-ink-primary tracking-tight">{title}</h2>
+      {subtitle && <p className="mt-3 text-sm text-ink-muted max-w-xl mx-auto font-body">{subtitle}</p>}
+    </Reveal>
+  );
+}
+
+function Logo({ size = "h-7 w-7 rounded-[4px]" }: { size?: string }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className={`${size} bg-accent flex items-center justify-center text-[#002116] font-bold text-xs tracking-wider shadow-sm`}>SV</div>
+      <span className="font-display text-xl font-medium tracking-tight text-ink-primary">ScopeVanta</span>
+    </div>
+  );
+}
 
 export default function LandingPage() {
   const bentoGridRef = useRef<HTMLDivElement>(null);
   const pricingGridRef = useRef<HTMLDivElement>(null);
   const reduced = usePrefersReducedMotion();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
-
-  const heroIn = reduced || mounted;
-  // Keyframes kept local to this file (no globals.css changes) for the
-  // capability loop marquee and the flowing-accent divider.
-  const localKeyframes = useMemo(
-    () => `
-      @keyframes sv-marquee {
-        from { transform: translateX(0); }
-        to { transform: translateX(-50%); }
-      }
-    `,
-    []
-  );
+  useForcedDarkDocument();
 
   return (
-    <div className="relative min-h-screen bg-surface-0 text-ink-primary font-body overflow-x-hidden selection:bg-accent/30 selection:text-white">
-      <style>{localKeyframes}</style>
+    // `dark` on this wrapper re-scopes every theme token to the dark palette
+    // for the landing page only, from the first server-rendered paint.
+    <div className="dark relative min-h-screen bg-surface-0 text-ink-primary font-body overflow-x-hidden selection:bg-accent/30 selection:text-white">
+      <style>{LOCAL_CSS}</style>
       <BackgroundTexture reduced={reduced} />
       <SectionNav reduced={reduced} />
 
@@ -648,34 +667,31 @@ export default function LandingPage() {
 
       {/* Navigation Header */}
       <header className="relative z-50 border-b border-border-hairline/60 bg-surface-0/80 backdrop-blur-md sticky top-0">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="h-7 w-7 rounded-[4px] bg-accent flex items-center justify-center text-[#002116] font-bold text-xs tracking-wider shadow-sm">
-              SV
-            </div>
-            <span className="font-display text-xl font-medium tracking-tight text-ink-primary">
-              ScopeVanta
-            </span>
-          </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+          <Link href="/" aria-label="ScopeVanta home">
+            <Logo />
+          </Link>
 
-          {/* <nav className="hidden md:flex items-center gap-8 text-xs font-mono uppercase tracking-wider text-ink-muted">
-            <a href="#features" className="hover:text-ink-primary transition-colors">Features</a>
-            <a href="#pricing" className="hover:text-ink-primary transition-colors">Pricing & Plans</a>
-          </nav> */}
+          <nav className="hidden md:flex items-center gap-7 text-xs font-mono uppercase tracking-wider text-ink-muted" aria-label="Primary">
+            {SECTION_NAV.map((s) => (
+              <a key={s.id} href={`#${s.id}`} className="hover:text-ink-primary transition-colors">
+                {s.label}
+              </a>
+            ))}
+          </nav>
 
-          <div className="flex items-center gap-3">
-            <ThemeToggle collapsed />
+          <div className="flex items-center gap-2 sm:gap-3">
             <Link
               href="/sign-in"
-              className="text-xs font-medium text-ink-secondary hover:text-ink-primary px-3.5 py-1.5 transition-colors cursor-pointer"
+              className="text-xs font-medium text-ink-secondary hover:text-ink-primary px-2 sm:px-3.5 py-1.5 transition-colors"
             >
-              Sign In
+              Sign in
             </Link>
             <Link
               href="/sign-up"
-              className="rounded-full bg-accent px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#002116] hover:bg-accent-hover active:bg-accent-pressed transition-all shadow-[0_2px_12px_rgba(var(--accent-rgb),0.3)] cursor-pointer"
+              className="whitespace-nowrap rounded-full bg-accent px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#002116] hover:bg-accent-hover active:bg-accent-pressed transition-all shadow-[0_2px_12px_rgba(var(--accent-rgb),0.3)]"
             >
-              Register
+              Start free
             </Link>
           </div>
         </div>
@@ -683,51 +699,40 @@ export default function LandingPage() {
 
       <main className="relative z-10">
         {/* Hero Section */}
-        <section className="pt-24 pb-20 px-6 max-w-5xl mx-auto text-center">
-          <h1 className="font-display text-4xl sm:text-6xl lg:text-7xl font-normal tracking-tight text-ink-primary leading-[1.1]">
-            <span
-              className="block transition-all duration-600 ease-out"
-              style={{ opacity: heroIn ? 1 : 0, transform: heroIn ? "translateY(0)" : "translateY(14px)", transitionDelay: "100ms" }}
-            >
+        <section className="pt-20 sm:pt-24 pb-20 px-6 max-w-5xl mx-auto text-center">
+          <p className="sv-rise text-xs font-mono uppercase tracking-wider text-accent-hover" style={{ animationDelay: "0ms" }}>
+            For agencies, studios &amp; consultants who price client work
+          </p>
+          <h1 className="mt-5 font-display text-4xl sm:text-6xl lg:text-7xl font-normal tracking-tight text-ink-primary leading-[1.1]">
+            <span className="sv-rise block" style={{ animationDelay: "100ms" }}>
               Build clearer scopes and
             </span>
-            <span
-              className="block italic font-medium text-accent-hover transition-all duration-600 ease-out"
-              style={{ opacity: heroIn ? 1 : 0, transform: heroIn ? "translateY(0)" : "translateY(14px)", transitionDelay: "220ms" }}
-            >
+            <span className="sv-rise block italic font-medium text-accent-hover" style={{ animationDelay: "220ms" }}>
               more profitable agreements.
             </span>
           </h1>
 
           <p
-            className="mt-6 max-w-2xl mx-auto text-base sm:text-lg text-ink-muted leading-relaxed font-display transition-all duration-600 ease-out"
-            style={{ opacity: heroIn ? 1 : 0, transform: heroIn ? "translateY(0)" : "translateY(14px)", transitionDelay: "340ms" }}
+            className="sv-rise mt-6 max-w-2xl mx-auto text-base sm:text-lg text-ink-muted leading-relaxed font-display"
+            style={{ animationDelay: "340ms" }}
           >
-            ScopeVanta turns client requirements into clear scopes, identifies commercial risk, and protects your margins from first discovery through change orders.
+            Turn a messy client brief into a priced, risk-checked proposal your client can approve online — then keep every change request inside the margin you agreed.
           </p>
 
-          <div
-            className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 transition-all duration-600 ease-out"
-            style={{ opacity: heroIn ? 1 : 0, transform: heroIn ? "translateY(0)" : "translateY(14px)", transitionDelay: "460ms" }}
-          >
+          <div className="sv-rise mt-10 flex flex-col sm:flex-row items-center justify-center gap-3" style={{ animationDelay: "460ms" }}>
             <Link href="/sign-up" className={`w-full sm:w-auto ${PRIMARY_CTA}`}>
-              <span>Launch Commercial Command Center</span>
+              <span>{TRIAL_CTA}</span>
               <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
             </Link>
-            <a href="#pricing" className={`w-full sm:w-auto ${SECONDARY_CTA}`}>
-              <span>Explore Subscription Styles</span>
-              <span className="material-symbols-outlined text-[16px]">credit_card</span>
+            <a href="#capabilities" className={`w-full sm:w-auto ${SECONDARY_CTA}`}>
+              <span>See what it does</span>
             </a>
           </div>
 
           {/* Live product mockup — not a static screenshot */}
-          <div
-            className="transition-all duration-700 ease-out"
-            style={{ opacity: heroIn ? 1 : 0, transform: heroIn ? "translateY(0)" : "translateY(18px)", transitionDelay: "560ms" }}
-          >
+          <div className="sv-rise" style={{ animationDelay: "560ms" }}>
             <ProductMockup reduced={reduced} />
           </div>
-
         </section>
 
         {/* Capability loop */}
@@ -738,40 +743,31 @@ export default function LandingPage() {
         </section>
 
         {/* Feature Bento Grid Section */}
-        <section id="features" className="py-20 px-6 max-w-7xl mx-auto">
-          <Reveal reduced={reduced} className="mb-12 text-center">
-            <p className="text-xs font-mono uppercase tracking-wider text-accent-hover mb-2">Deal Architecture</p>
-            <h2 className="font-display text-3xl sm:text-4xl font-normal text-ink-primary tracking-tight">
-              Engineered to eliminate commercial leakage
-            </h2>
-            <p className="mt-3 text-sm text-ink-muted max-w-xl mx-auto font-body">
-              Every proposal is fortified with active risk calculations, margin controls, and automated client clarity.
-            </p>
-          </Reveal>
+        <section id="features" className="scroll-mt-20 py-20 px-6 max-w-7xl mx-auto">
+          <SectionHeading
+            reduced={reduced}
+            eyebrow="Features"
+            title="Everything between the brief and the signature"
+            subtitle="Scope it, price it, check it, and get it approved — without losing margin along the way."
+          />
 
           <Reveal reduced={reduced}>
             <BentoCardGrid gridRef={bentoGridRef} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {FEATURES.map((feature, index) => (
-                <BentoCard key={index} className="p-6 flex flex-col justify-between min-h-[220px]" glowColor="78, 135, 112">
-                  <div>
-                    <div className="flex items-center justify-between pb-3 border-b border-border-subtle">
-                      <span className="text-[11px] font-mono uppercase tracking-wider text-accent-hover font-medium">
-                        {feature.label}
-                      </span>
-                      <span className="material-symbols-outlined text-[18px] text-ink-muted">{feature.icon}</span>
-                    </div>
-                    <div className="mt-4">
-                      <h3 className="font-display text-xl font-medium text-ink-primary mb-2 tracking-tight">
-                        {feature.title}
-                      </h3>
-                      <p className="text-xs text-ink-muted leading-relaxed font-body">
-                        {feature.description}
-                      </p>
-                    </div>
+              {FEATURES.map((feature) => (
+                <BentoCard key={feature.title} className="p-6 flex flex-col min-h-[200px]" glowColor="78, 135, 112">
+                  <div className="flex items-center justify-between pb-3 border-b border-border-subtle">
+                    <span className="text-[11px] font-mono uppercase tracking-wider text-accent-hover font-medium">
+                      {feature.label}
+                    </span>
+                    <span className="material-symbols-outlined text-[18px] text-ink-muted">{feature.icon}</span>
                   </div>
-                  <div className="mt-6 flex items-center gap-1 text-[11px] font-mono text-ink-disabled group-hover:text-accent transition-colors">
-                    <span>SYSTEM OPERATIONAL</span>
-                    <span className="material-symbols-outlined text-[12px] text-accent">check</span>
+                  <div className="mt-4">
+                    <h3 className="font-display text-xl font-medium text-ink-primary mb-2 tracking-tight">
+                      {feature.title}
+                    </h3>
+                    <p className="text-sm text-ink-muted leading-relaxed font-body">
+                      {feature.description}
+                    </p>
                   </div>
                 </BentoCard>
               ))}
@@ -795,21 +791,18 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* Subscription Style & Pricing Section */}
-        <section id="pricing" className="py-24 px-6 max-w-7xl mx-auto border-t border-border-hairline/60">
-          <Reveal reduced={reduced} className="mb-14 text-center">
-            <p className="text-xs font-mono uppercase tracking-wider text-accent-hover mb-2">Flexible Commercial Membership</p>
-            <h2 className="font-display text-3xl sm:text-5xl font-normal text-ink-primary tracking-tight">
-              Choose your subscription style
-            </h2>
-            <p className="mt-3 text-sm text-ink-muted max-w-xl mx-auto font-body">
-              Transparent, per-workspace tiers backed by Square. Switch or cancel anytime without friction.
-            </p>
-          </Reveal>
+        {/* Pricing Section */}
+        <section id="pricing" className="scroll-mt-20 py-24 px-6 max-w-7xl mx-auto border-t border-border-hairline/60">
+          <SectionHeading
+            reduced={reduced}
+            eyebrow="Pricing"
+            title="Simple plans. Every feature included."
+            subtitle={`Pick a plan by how many proposals you send. One flat price per workspace, billed monthly in ${PLAN_CURRENCY} through Square. First ${TRIAL_DAYS} days free.`}
+          />
 
           <Reveal reduced={reduced}>
-            <BentoCardGrid gridRef={pricingGridRef} className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto">
-              {TIERS.map((tier) => (
+            <BentoCardGrid gridRef={pricingGridRef} className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+              {PLANS.map((tier) => (
                 <BentoCard
                   key={tier.name}
                   className={`p-8 flex flex-col justify-between transition-all duration-300 hover:-translate-y-1 hover:border-accent ${
@@ -824,100 +817,143 @@ export default function LandingPage() {
                       <h3 className="font-display text-2xl font-medium text-ink-primary">{tier.name}</h3>
                       {tier.popular && (
                         <span className="text-[10px] font-mono uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-accent/20 text-accent-hover border border-accent/40 font-semibold">
-                          Most Popular
+                          Most popular
                         </span>
                       )}
                     </div>
 
                     <div className="mt-5 flex items-baseline gap-1.5">
-                      <span className="font-mono text-4xl font-semibold text-ink-primary tracking-tight">
-                        {tier.price}
+                      <span className="font-mono text-4xl font-semibold text-ink-primary tracking-tight">{tier.price}</span>
+                      <span className="text-xs font-mono text-ink-muted">
+                        {PLAN_CURRENCY} {tier.cadence}
                       </span>
-                      <span className="text-xs font-mono text-ink-muted">{tier.cadence}</span>
                     </div>
 
-                    <p className="mt-3 text-xs text-ink-muted leading-relaxed font-body min-h-[36px]">
-                      {tier.description}
-                    </p>
+                    <p className="mt-3 text-sm text-ink-muted leading-relaxed font-body">{tier.description}</p>
 
-                    <div className="mt-6 space-y-2.5 border-t border-border-subtle pt-6">
-                      {tier.features.map((feat) => (
-                        <div key={feat} className="flex items-start gap-2.5 text-xs text-ink-secondary">
-                          <span className="material-symbols-outlined text-accent text-[16px] shrink-0 mt-0.5">
-                            check_circle
-                          </span>
-                          <span className="font-body">{feat}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="mt-8 pt-4">
-                    <Link
-                      href="/sign-up"
-                      className={`w-full inline-flex items-center justify-center gap-2 rounded-full py-2.5 text-xs font-semibold uppercase tracking-wider transition-all ${
-                        tier.popular
-                          ? "bg-accent text-[#002116] hover:bg-accent-hover active:bg-accent-pressed shadow-[0_2px_12px_rgba(var(--accent-rgb),0.25)]"
-                          : "border border-border-hairline bg-surface-2 text-ink-primary hover:bg-surface-3"
-                      }`}
-                    >
-                      <span>{tier.cta}</span>
-                      <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
-                    </Link>
-                    <p className="mt-2 text-center text-[10px] font-mono text-ink-disabled">
-                      Includes 14-day full platform access
+                    <p className="mt-6 flex items-center gap-2.5 border-t border-border-subtle pt-6 text-sm font-medium text-ink-primary">
+                      <span className="material-symbols-outlined text-accent text-[18px]">description</span>
+                      {tier.limit}
                     </p>
                   </div>
+
+                  <Link
+                    href="/sign-up"
+                    className={`mt-8 w-full inline-flex items-center justify-center gap-2 rounded-full py-2.5 text-xs font-semibold uppercase tracking-wider transition-all ${
+                      tier.popular
+                        ? "bg-accent text-[#002116] hover:bg-accent-hover active:bg-accent-pressed shadow-[0_2px_12px_rgba(var(--accent-rgb),0.25)]"
+                        : "border border-border-hairline bg-surface-2 text-ink-primary hover:bg-surface-3"
+                    }`}
+                  >
+                    <span>Start free trial</span>
+                    <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                  </Link>
                 </BentoCard>
               ))}
             </BentoCardGrid>
           </Reveal>
+
+          <Reveal reduced={reduced} className="mx-auto mt-10 max-w-5xl rounded-[16px] border border-border-hairline bg-surface-1/80 p-6 sm:p-8">
+            <p className="text-[11px] font-mono font-medium uppercase tracking-wider text-ink-secondary">Included on every plan</p>
+            <ul className="mt-4 grid grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-4">
+              {ALL_PLAN_FEATURES.map((feat) => (
+                <li key={feat} className="flex items-start gap-2 text-sm text-ink-secondary font-body">
+                  <span className="material-symbols-outlined text-accent text-[16px] mt-0.5 shrink-0">check_circle</span>
+                  {feat}
+                </li>
+              ))}
+            </ul>
+          </Reveal>
         </section>
 
-        {/* Footer */}
-        <footer className="border-t border-border-hairline/60 bg-surface-1/50 px-6 pt-8 pb-5 backdrop-blur-sm">
-          <div className="max-w-7xl mx-auto">
-            <div className="grid gap-6 border-b border-border-hairline/60 pb-8 md:grid-cols-[minmax(0,1.4fr)_repeat(2,minmax(0,0.6fr))]">
-              <div className="max-w-sm">
-                <div className="flex items-center gap-3">
-                  <div className="h-8 w-8 rounded-[5px] bg-accent flex items-center justify-center text-[#002116] font-bold text-xs tracking-wider shadow-sm">
-                    SV
-                  </div>
-                  <span className="font-display text-xl font-medium tracking-tight text-ink-primary">ScopeVanta</span>
-                </div>
-                <p className="mt-3 text-sm leading-relaxed text-ink-muted font-body">
-                  Build clearer scopes, protect your margins, and send agreements with confidence.
-                </p>
-                <Link href="/sign-up" className={`${PRIMARY_CTA} mt-4 w-fit`}>
-                  <span>Get started</span>
-                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-                </Link>
-              </div>
+        {/* FAQ */}
+        <section id="faq" className="scroll-mt-20 py-20 px-6 max-w-3xl mx-auto border-t border-border-hairline/60">
+          <SectionHeading reduced={reduced} eyebrow="FAQ" title="Common questions" />
+          <Reveal reduced={reduced} className="divide-y divide-border-hairline overflow-hidden rounded-[16px] border border-border-hairline bg-surface-1">
+            {FAQS.map((item) => (
+              <details
+                key={item.q}
+                className="group relative px-6 py-5 transition-colors duration-300 hover:bg-accent/[0.06] focus-within:bg-accent/[0.06] motion-reduce:transition-none"
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-display text-lg font-medium text-ink-primary outline-none [&::-webkit-details-marker]:hidden">
+                  {/* Accent bar that grows in from the middle on hover/focus. Lives inside
+                      <summary> because a closed <details> hides its other children. */}
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-y-3 left-0 w-[3px] origin-center scale-y-0 rounded-full bg-accent transition-transform duration-300 ease-out group-hover:scale-y-100 group-focus-within:scale-y-100 group-open:scale-y-100 motion-reduce:transition-none"
+                  />
+                  <span className="transition-[transform,color] duration-300 ease-out group-hover:translate-x-1 group-hover:text-accent-hover group-focus-within:translate-x-1 group-focus-within:text-accent-hover motion-reduce:transition-none motion-reduce:group-hover:translate-x-0">
+                    {item.q}
+                  </span>
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-[background-color,transform] duration-300 ease-out group-hover:scale-110 group-hover:bg-accent/15 group-focus-within:bg-accent/15 motion-reduce:transition-none motion-reduce:group-hover:scale-100">
+                    <span className="material-symbols-outlined text-[20px] text-ink-muted transition-[transform,color] duration-300 group-hover:text-accent-hover group-open:rotate-45 group-open:text-accent-hover">
+                      add
+                    </span>
+                  </span>
+                </summary>
+                <p className="mt-3 text-sm leading-relaxed text-ink-muted font-body">{item.a}</p>
+              </details>
+            ))}
+          </Reveal>
+        </section>
 
-              <div>
-                <p className="text-[11px] font-mono font-medium uppercase tracking-wider text-ink-secondary">Explore</p>
-                <nav className="mt-4 flex flex-col items-start gap-3 text-sm text-ink-muted font-body" aria-label="Footer navigation">
-                  <a href="#features" className="hover:text-accent-hover transition-colors">Capabilities</a>
-                  <a href="#pricing" className="hover:text-accent-hover transition-colors">Pricing &amp; plans</a>
-                </nav>
-              </div>
+        {/* Closing CTA */}
+        <section className="px-6 pb-24">
+          <Reveal
+            reduced={reduced}
+            className="mx-auto max-w-4xl rounded-[20px] border border-accent/40 bg-surface-2/95 px-6 py-14 text-center shadow-[0_0_40px_rgba(var(--accent-rgb),0.12)]"
+          >
+            <h2 className="font-display text-3xl sm:text-4xl font-normal tracking-tight text-ink-primary">
+              Send your next proposal with confidence.
+            </h2>
+            <p className="mt-3 text-sm text-ink-muted font-body">
+              {TRIAL_DAYS} days free. Every feature included.
+            </p>
+            <Link href="/sign-up" className={`${PRIMARY_CTA} mt-8`}>
+              <span>{TRIAL_CTA}</span>
+              <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+            </Link>
+          </Reveal>
+        </section>
+      </main>
 
-              <div>
-                <p className="text-[11px] font-mono font-medium uppercase tracking-wider text-ink-secondary">Account</p>
-                <nav className="mt-4 flex flex-col items-start gap-3 text-sm text-ink-muted font-body" aria-label="Account navigation">
-                  <Link href="/sign-in" className="hover:text-accent-hover transition-colors">Sign in</Link>
-                  <Link href="/sign-up" className="hover:text-accent-hover transition-colors">Create an account</Link>
-                </nav>
-              </div>
+      {/* Footer */}
+      <footer className="relative z-10 border-t border-border-hairline/60 bg-surface-1/50 px-6 pt-8 pb-5 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto">
+          <div className="grid gap-6 border-b border-border-hairline/60 pb-8 md:grid-cols-[minmax(0,1.4fr)_repeat(2,minmax(0,0.6fr))]">
+            <div className="max-w-sm">
+              <Logo size="h-8 w-8 rounded-[5px]" />
+              <p className="mt-3 text-sm leading-relaxed text-ink-muted font-body">
+                Build clearer scopes, protect your margins, and send agreements with confidence.
+              </p>
             </div>
 
-            <div className="flex flex-col gap-2 pt-5 text-[11px] font-mono text-ink-disabled sm:flex-row sm:items-center sm:justify-between">
-              <span>© {new Date().getFullYear()} ScopeVanta. All rights reserved.</span>
-              <span className="uppercase tracking-wider">Commercial clarity for service businesses</span>
+            <div>
+              <p className="text-[11px] font-mono font-medium uppercase tracking-wider text-ink-secondary">Explore</p>
+              <nav className="mt-4 flex flex-col items-start gap-3 text-sm text-ink-muted font-body" aria-label="Footer navigation">
+                {SECTION_NAV.map((s) => (
+                  <a key={s.id} href={`#${s.id}`} className="hover:text-accent-hover transition-colors">
+                    {s.label}
+                  </a>
+                ))}
+              </nav>
+            </div>
+
+            <div>
+              <p className="text-[11px] font-mono font-medium uppercase tracking-wider text-ink-secondary">Account</p>
+              <nav className="mt-4 flex flex-col items-start gap-3 text-sm text-ink-muted font-body" aria-label="Account navigation">
+                <Link href="/sign-in" className="hover:text-accent-hover transition-colors">Sign in</Link>
+                <Link href="/sign-up" className="hover:text-accent-hover transition-colors">Create an account</Link>
+              </nav>
             </div>
           </div>
-        </footer>
-      </main>
+
+          <div className="flex flex-col gap-2 pt-5 text-[11px] font-mono text-ink-disabled sm:flex-row sm:items-center sm:justify-between">
+            <span>© {new Date().getFullYear()} ScopeVanta. All rights reserved.</span>
+            <span className="uppercase tracking-wider">Commercial clarity for service businesses</span>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

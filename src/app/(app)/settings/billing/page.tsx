@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { PageHeader, Button, Badge } from "@/components/ui";
 import { BentoCard, BentoCardGrid, GlobalSpotlight } from "@/components/MagicBento";
 import { trackEvent } from "@/lib/track";
+import { PLANS, ALL_PLAN_FEATURES } from "@/lib/plans";
 
 type BillingStatus = {
   billing: { status: string; daysLeft: number; limit: number; requiresAction?: boolean; action?: string };
@@ -11,32 +12,9 @@ type BillingStatus = {
   subscriptionId: string; verifiedAt: string; lastBillingEvent: string;
 };
 
-const PLANS = [
-  {
-    name: "Freelancer",
-    price: "$19",
-    cadence: "/month",
-    description: "For solo operators & consultants managing focused high-stakes bids.",
-    features: ["Up to 10 active proposals", "Core AI Discovery & Risk analysis", "Client sharing links", "Export to PDF"],
-    popular: false
-  },
-  {
-    name: "Pro",
-    price: "$49",
-    cadence: "/month",
-    description: "For boutique studios & fast-moving agencies closing weekly pipeline.",
-    features: ["Up to 40 active proposals", "Deep Contract Red-Teaming", "Commercial Margin Guard", "Knowledge base grounding", "Priority support"],
-    popular: true
-  },
-  {
-    name: "Agency",
-    price: "$99",
-    cadence: "/month",
-    description: "For multi-seat commercial teams demanding enterprise-grade deal control.",
-    features: ["Up to 150 active proposals", "Unlimited team workspace seats", "Custom rate cards & templates", "Dedicated Square reconciliation", "Full audit history"],
-    popular: false
-  }
-] as const;
+// Shared with the landing page; every feature is on every plan, so each card
+// lists its proposal limit followed by the common feature set.
+const PLAN_CARDS = PLANS.map((p) => ({ ...p, features: [p.limit, ...ALL_PLAN_FEATURES] }));
 
 export default function BillingPage() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
@@ -176,7 +154,7 @@ export default function BillingPage() {
           </div>
 
           <div className="sidebar-expandable grid grid-cols-1 gap-4 max-w-5xl md:grid-cols-3">
-            {PLANS.map((tier) => {
+            {PLAN_CARDS.map((tier) => {
               const isCurrent = status.plan === tier.name;
               return (
                 <BentoCard

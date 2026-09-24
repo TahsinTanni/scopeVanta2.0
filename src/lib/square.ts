@@ -8,17 +8,9 @@ import { prisma } from "@/lib/prisma";
 const SQUARE_VERSION = "2026-08-19";
 const SQUARE_API_BASE = "https://connect.squareup.com";
 
-export const PLAN_PRICES_CENTS: Record<"Freelancer" | "Pro" | "Agency", number> = {
-  Freelancer: 1900,
-  Pro: 4900,
-  Agency: 9900,
-};
-
-export const PLAN_LIMITS: Record<"Freelancer" | "Pro" | "Agency", number> = {
-  Freelancer: 10,
-  Pro: 40,
-  Agency: 150,
-};
+// Prices and limits live in lib/plans.ts so marketing copy and checkout share them.
+export { PLAN_PRICES_CENTS, PLAN_LIMITS } from "@/lib/plans";
+import { PLAN_PRICES_CENTS, PLAN_CURRENCY } from "@/lib/plans";
 
 export async function square(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
   const token = process.env.SQUARE_ACCESS_TOKEN;
@@ -77,8 +69,8 @@ export async function billingConfig() {
             name: `ScopeVanta ${name}`,
             subscription_plan_id: planId,
             phases: [
-              { cadence: "MONTHLY", ordinal: 0, periods: 1, pricing: { type: "STATIC", price: { amount: 0, currency: "CAD" } } },
-              { cadence: "MONTHLY", ordinal: 1, pricing: { type: "STATIC", price: { amount: PLAN_PRICES_CENTS[name], currency: "CAD" } } },
+              { cadence: "MONTHLY", ordinal: 0, periods: 1, pricing: { type: "STATIC", price: { amount: 0, currency: PLAN_CURRENCY } } },
+              { cadence: "MONTHLY", ordinal: 1, pricing: { type: "STATIC", price: { amount: PLAN_PRICES_CENTS[name], currency: PLAN_CURRENCY } } },
             ],
           },
         },
@@ -137,7 +129,7 @@ export async function createCheckout(workspaceId: string, buyerEmail: string, pl
       idempotency_key: crypto.randomUUID(),
       quick_pay: {
         name: `ScopeVanta ${plan} - 30 day trial`,
-        price_money: { amount: 0, currency: "CAD" },
+        price_money: { amount: 0, currency: PLAN_CURRENCY },
         location_id: cfg.locationId,
       },
       checkout_options: {
