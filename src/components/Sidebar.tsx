@@ -148,7 +148,12 @@ export default function Sidebar({ nav, children }: { nav: NavItem[]; children: R
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto bg-surface-0 px-4 py-6 pt-16 sm:px-6 lg:px-8 lg:py-8 lg:pt-8">{children}</main>
+      <main
+        data-sidebar-collapsed={mounted && collapsed ? "true" : "false"}
+        className="min-w-0 flex-1 overflow-y-auto bg-surface-0 px-4 py-6 pt-16 sm:px-6 lg:px-8 lg:py-8 lg:pt-8"
+      >
+        {children}
+      </main>
       <SupportChat />
     </div>
   );

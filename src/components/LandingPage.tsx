@@ -16,39 +16,39 @@ import ThemeToggle from "@/components/ThemeToggle";
 
 const FEATURES = [
   {
-    title: "AI Commercial Discovery",
-    description: "Deconstruct messy client briefs into explicit milestones, bounded deliverables, and unpriced risks in seconds.",
-    label: "Intelligence",
+    title: "Brief & Scope Analysis",
+    description: "Turn a client brief into structured requirements, clarification questions, identified risks, and a proposal-ready scope.",
+    label: "Discovery",
     icon: "psychology"
   },
   {
-    title: "Scope Margin Guard",
-    description: "Real-time fee sensitivity modeling, contractor cost buffers, and dynamic margin protection on every proposal.",
+    title: "Scope & Margin Modeling",
+    description: "Build estimate lines with hours and rates, then compare floor, recommended, and premium pricing against target margins.",
     label: "Economics",
     icon: "payments"
   },
   {
-    title: "Contractual Red-Teaming",
-    description: "Simulate adversarial client behavior and locate unbudgeted liabilities before your proposal leaves the door.",
-    label: "Protection",
+    title: "Proposal Audit",
+    description: "Check requirements, deliverables, acceptance criteria, exclusions, and commercial consistency before sharing a proposal.",
+    label: "Quality control",
     icon: "security"
   },
   {
-    title: "Executive Client Portals",
-    description: "Live interactive links for one-click buyer approvals, milestone tracking, and friction-free payment settlement.",
-    label: "Velocity",
+    title: "Client Deal Room",
+    description: "Share a secure proposal link where clients can review scope, select a package, accept, or request changes.",
+    label: "Client review",
     icon: "send"
   },
   {
-    title: "Change-Order Autopsy",
-    description: "Automatically identify creep during delivery and generate audited scope adjustments at pre-agreed rates.",
-    label: "Auditing",
+    title: "Scope Baselines & Changes",
+    description: "Record an approved scope baseline, compare new requests against it, and prepare change orders with their commercial impact.",
+    label: "Change control",
     icon: "history_edu"
   },
   {
-    title: "Institutional Knowledge Base",
-    description: "Ground future agreements in your historical win patterns, rate ledgers, and proven delivery constraints.",
-    label: "Memory",
+    title: "Knowledge Base Grounding",
+    description: "Upload service sheets, rate cards, and reference files so proposals are grounded in your workspace context.",
+    label: "Workspace context",
     icon: "auto_stories"
   }
 ];
@@ -103,11 +103,6 @@ const TIERS = [
   }
 ];
 
-// The opportunity workspace's real six-step rail, as labeled there
-// (STEP_LABELS in proposals/[id]/page.tsx), plus the discovery step the
-// product actually performs before scoping — same terminology, not renamed.
-const WORKFLOW = ["Analyze", "Clarify", "Scope", "Price", "Propose", "Win", "Protect"];
-
 // Each card describes a real, already-built capability — rephrased from
 // FEATURES above as an outcome sentence (not duplicated verbatim), traceable
 // 1:1 back to a real FEATURES entry.
@@ -146,7 +141,6 @@ const CAROUSEL_CARDS = [
 
 const SECTION_NAV = [
   { id: "features", label: "Features" },
-  { id: "pipeline", label: "Workflow" },
   { id: "capabilities", label: "Capabilities" },
   { id: "pricing", label: "Pricing" },
 ];
@@ -440,11 +434,10 @@ function Reveal({
 
 // Horizontal infinite-scroll strip of real capability names (LogoLoop
 // pattern, no library): the content list is rendered twice back-to-back and
-// the track translates by exactly -50% so the loop is seamless. Pauses on
-// hover; frozen entirely under reduced motion.
+// the track translates by exactly -50% so the loop is seamless. It continues
+// through hover and freezes entirely under reduced motion.
 function CapabilityLoop({ reduced }: { reduced: boolean }) {
   const chips = [...FEATURES, ...FEATURES];
-  const [paused, setPaused] = useState(false);
 
   return (
     // No card/border/dot-grid wrapper — a bare, full-bleed strip sitting
@@ -453,8 +446,6 @@ function CapabilityLoop({ reduced }: { reduced: boolean }) {
     <div
       className="relative overflow-hidden"
       style={{ height: 96 }}
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
     >
       {/* Edge fade to the actual page background, not a card surface */}
       <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-16 sm:w-28 bg-gradient-to-r from-surface-0 to-transparent" />
@@ -472,7 +463,6 @@ function CapabilityLoop({ reduced }: { reduced: boolean }) {
                   animationDuration: "12s",
                   animationTimingFunction: "linear",
                   animationIterationCount: "infinite",
-                  animationPlayState: paused ? "paused" : "running",
                 }
           }
         >
@@ -485,76 +475,6 @@ function CapabilityLoop({ reduced }: { reduced: boolean }) {
               {f.title}
             </span>
           ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Muted flowing-accent divider (Strands pattern, CSS only): 3 soft blurred
-// elongated shapes drifting slowly. Freezes in place under reduced motion.
-// Muted flowing-accent divider (Strands pattern, CSS/SVG only). Two layers:
-// soft blurred blobs for depth, plus a set of wave lines that visibly drift
-// left continuously (the "flowing" motion) — legible against a dark bg,
-// unlike a single faint blurred blob. All animation is inline style, not a
-// Tailwind bracket class, so it never depends on the CSS bundle recompiling.
-function FlowingDivider({ reduced }: { reduced: boolean }) {
-  const blobs = [
-    { top: "8%", left: "4%", w: 380, h: 140, dur: "14s", delay: "0s" },
-    { top: "44%", left: "56%", w: 340, h: 120, dur: "18s", delay: "1.2s" },
-    { top: "60%", left: "18%", w: 300, h: 110, dur: "22s", delay: "2.4s" },
-  ];
-
-  const WaveLayer = () => (
-    <svg width={900} height={200} viewBox="0 0 900 200" fill="none" className="shrink-0">
-      <path d="M0 60 C 150 10, 300 110, 450 60 S 750 10, 900 60" stroke="rgba(var(--accent-rgb), 0.55)" strokeWidth="2" />
-      <path d="M0 110 C 150 160, 300 60, 450 110 S 750 160, 900 110" stroke="rgba(var(--accent-rgb), 0.3)" strokeWidth="2" />
-      <path d="M0 150 C 150 120, 300 180, 450 150 S 750 120, 900 150" stroke="rgba(var(--accent-rgb), 0.18)" strokeWidth="2" />
-    </svg>
-  );
-
-  return (
-    <div className="relative h-56 overflow-hidden" aria-hidden="true">
-      {blobs.map((b, i) => (
-        <div
-          key={i}
-          className="absolute rounded-full"
-          style={{
-            top: b.top,
-            left: b.left,
-            width: b.w,
-            height: b.h,
-            background: "rgba(var(--accent-rgb), 0.32)",
-            filter: "blur(46px)",
-            ...(reduced
-              ? {}
-              : {
-                  animationName: "sv-flow",
-                  animationDuration: b.dur,
-                  animationDelay: b.delay,
-                  animationTimingFunction: "ease-in-out",
-                  animationIterationCount: "infinite",
-                  animationDirection: "alternate",
-                }),
-          }}
-        />
-      ))}
-      <div className="absolute inset-0 flex items-center justify-center opacity-70">
-        <div
-          className="flex w-max items-center"
-          style={
-            reduced
-              ? undefined
-              : {
-                  animationName: "sv-marquee",
-                  animationDuration: "22s",
-                  animationTimingFunction: "linear",
-                  animationIterationCount: "infinite",
-                }
-          }
-        >
-          <WaveLayer />
-          <WaveLayer />
         </div>
       </div>
     </div>
@@ -652,21 +572,16 @@ function SectionNav({ reduced }: { reduced: boolean }) {
 // next buttons and dot indicators stay in sync with the real scroll position
 // via a scroll listener, so dragging/swiping and the buttons agree.
 // Side-by-side cards, auto-scrolling right to left in a seamless loop — same
-// proven technique as CapabilityLoop/FlowingDivider (content rendered twice,
+// proven technique as CapabilityLoop (content rendered twice,
 // translated by exactly -50% via the sv-marquee keyframe, applied as an
 // inline animation so it never depends on a Tailwind class being freshly
-// compiled). Pauses on hover; frozen under reduced motion. Card copy is
+// compiled). Continues through hover; frozen under reduced motion. Card copy is
 // unchanged from CAROUSEL_CARDS — only the presentation changed.
 function CardMarquee({ reduced }: { reduced: boolean }) {
   const cards = [...CAROUSEL_CARDS, ...CAROUSEL_CARDS];
-  const [paused, setPaused] = useState(false);
 
   return (
-    <div
-      className="relative overflow-hidden"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-    >
+    <div className="relative overflow-hidden">
       <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-10 sm:w-24 bg-gradient-to-r from-surface-0 to-transparent" />
       <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-10 sm:w-24 bg-gradient-to-l from-surface-0 to-transparent" />
       <div
@@ -679,7 +594,6 @@ function CardMarquee({ reduced }: { reduced: boolean }) {
                 animationDuration: "36s",
                 animationTimingFunction: "linear",
                 animationIterationCount: "infinite",
-                animationPlayState: paused ? "paused" : "running",
               }
         }
       >
@@ -710,8 +624,6 @@ export default function LandingPage() {
   useEffect(() => setMounted(true), []);
 
   const heroIn = reduced || mounted;
-  const workflowReveal = useInView<HTMLDivElement>(reduced);
-
   // Keyframes kept local to this file (no globals.css changes) for the
   // capability loop marquee and the flowing-accent divider.
   const localKeyframes = useMemo(
@@ -719,10 +631,6 @@ export default function LandingPage() {
       @keyframes sv-marquee {
         from { transform: translateX(0); }
         to { transform: translateX(-50%); }
-      }
-      @keyframes sv-flow {
-        from { transform: translate(0, 0) scale(1); opacity: 0.6; }
-        to { transform: translate(24px, -14px) scale(1.08); opacity: 1; }
       }
     `,
     []
@@ -750,11 +658,10 @@ export default function LandingPage() {
             </span>
           </div>
 
-          <nav className="hidden md:flex items-center gap-8 text-xs font-mono uppercase tracking-wider text-ink-muted">
+          {/* <nav className="hidden md:flex items-center gap-8 text-xs font-mono uppercase tracking-wider text-ink-muted">
             <a href="#features" className="hover:text-ink-primary transition-colors">Features</a>
-            <a href="#pipeline" className="hover:text-ink-primary transition-colors">Framework</a>
             <a href="#pricing" className="hover:text-ink-primary transition-colors">Pricing & Plans</a>
-          </nav>
+          </nav> */}
 
           <div className="flex items-center gap-3">
             <ThemeToggle collapsed />
@@ -777,34 +684,26 @@ export default function LandingPage() {
       <main className="relative z-10">
         {/* Hero Section */}
         <section className="pt-24 pb-20 px-6 max-w-5xl mx-auto text-center">
-          <div
-            className="inline-flex items-center gap-2 rounded-full border border-border-hairline bg-surface-1/90 px-3.5 py-1 text-xs font-mono text-ink-secondary mb-6 backdrop-blur-sm transition-all duration-500 ease-out"
-            style={{ opacity: heroIn ? 1 : 0, transform: heroIn ? "translateY(0)" : "translateY(8px)" }}
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse motion-reduce:animate-none" />
-            <span>Commercial Intelligence OS 2.0</span>
-          </div>
-
           <h1 className="font-display text-4xl sm:text-6xl lg:text-7xl font-normal tracking-tight text-ink-primary leading-[1.1]">
             <span
               className="block transition-all duration-600 ease-out"
               style={{ opacity: heroIn ? 1 : 0, transform: heroIn ? "translateY(0)" : "translateY(14px)", transitionDelay: "100ms" }}
             >
-              Turn vague client briefs into
+              Build clearer scopes and
             </span>
             <span
               className="block italic font-medium text-accent-hover transition-all duration-600 ease-out"
               style={{ opacity: heroIn ? 1 : 0, transform: heroIn ? "translateY(0)" : "translateY(14px)", transitionDelay: "220ms" }}
             >
-              iron-clad, high-margin agreements.
+              more profitable agreements.
             </span>
           </h1>
 
           <p
-            className="mt-6 max-w-2xl mx-auto text-base sm:text-lg text-ink-muted leading-relaxed font-body transition-all duration-600 ease-out"
+            className="mt-6 max-w-2xl mx-auto text-base sm:text-lg text-ink-muted leading-relaxed font-display transition-all duration-600 ease-out"
             style={{ opacity: heroIn ? 1 : 0, transform: heroIn ? "translateY(0)" : "translateY(14px)", transitionDelay: "340ms" }}
           >
-            ScopeVanta deconstructs requirements, models commercial friction, red-teams liability, and protects your margins from initial discovery to final change orders.
+            ScopeVanta turns client requirements into clear scopes, identifies commercial risk, and protects your margins from first discovery through change orders.
           </p>
 
           <div
@@ -829,32 +728,13 @@ export default function LandingPage() {
             <ProductMockup reduced={reduced} />
           </div>
 
-          {/* Workflow Sequence Strip — connectors fill left to right once in view */}
-          <div
-            id="pipeline"
-            ref={workflowReveal.ref}
-            className="mt-16 pt-8 border-t border-border-hairline/60 flex flex-wrap items-center justify-center gap-1 sm:gap-1.5 text-xs font-mono text-ink-muted"
-          >
-            {WORKFLOW.map((step, i) => (
-              <React.Fragment key={step}>
-                <span className="px-2.5 py-1 rounded-[4px] bg-surface-1 border border-border-subtle text-ink-secondary">
-                  {step}
-                </span>
-                {i < WORKFLOW.length - 1 && (
-                  <span className="relative h-px w-5 sm:w-8 overflow-hidden bg-border-subtle">
-                    <span
-                      className="absolute inset-y-0 left-0 bg-accent transition-all ease-out"
-                      style={{
-                        width: workflowReveal.inView ? "100%" : "0%",
-                        transitionDuration: "500ms",
-                        transitionDelay: `${i * 150}ms`,
-                      }}
-                    />
-                  </span>
-                )}
-              </React.Fragment>
-            ))}
-          </div>
+        </section>
+
+        {/* Capability loop */}
+        <section aria-label="Platform capabilities" className="pb-6">
+          <Reveal reduced={reduced}>
+            <CapabilityLoop reduced={reduced} />
+          </Reveal>
         </section>
 
         {/* Feature Bento Grid Section */}
@@ -899,7 +779,7 @@ export default function LandingPage() {
           </Reveal>
         </section>
 
-        {/* Capability Loop + Feature Carousel */}
+        {/* Feature Carousel */}
         <section id="capabilities" className="py-20 px-6 max-w-7xl mx-auto border-t border-border-hairline/60">
           <Reveal reduced={reduced} className="mb-10 text-center">
             <p className="text-xs font-mono uppercase tracking-wider text-accent-hover mb-2">What It Actually Does</p>
@@ -908,18 +788,12 @@ export default function LandingPage() {
             </h2>
           </Reveal>
 
-          <Reveal reduced={reduced}>
-            <CapabilityLoop reduced={reduced} />
-          </Reveal>
-
           <div className="mt-14">
             <Reveal reduced={reduced}>
               <CardMarquee reduced={reduced} />
             </Reveal>
           </div>
         </section>
-
-        <FlowingDivider reduced={reduced} />
 
         {/* Subscription Style & Pricing Section */}
         <section id="pricing" className="py-24 px-6 max-w-7xl mx-auto border-t border-border-hairline/60">
@@ -1001,20 +875,45 @@ export default function LandingPage() {
         </section>
 
         {/* Footer */}
-        <footer className="border-t border-border-hairline/60 py-12 px-6 bg-surface-1/50 backdrop-blur-sm">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-3">
-              <div className="h-6 w-6 rounded-[4px] bg-accent flex items-center justify-center text-[#002116] font-bold text-[10px]">
-                SV
+        <footer className="border-t border-border-hairline/60 bg-surface-1/50 px-6 pt-8 pb-5 backdrop-blur-sm">
+          <div className="max-w-7xl mx-auto">
+            <div className="grid gap-6 border-b border-border-hairline/60 pb-8 md:grid-cols-[minmax(0,1.4fr)_repeat(2,minmax(0,0.6fr))]">
+              <div className="max-w-sm">
+                <div className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-[5px] bg-accent flex items-center justify-center text-[#002116] font-bold text-xs tracking-wider shadow-sm">
+                    SV
+                  </div>
+                  <span className="font-display text-xl font-medium tracking-tight text-ink-primary">ScopeVanta</span>
+                </div>
+                <p className="mt-3 text-sm leading-relaxed text-ink-muted font-body">
+                  Build clearer scopes, protect your margins, and send agreements with confidence.
+                </p>
+                <Link href="/sign-up" className={`${PRIMARY_CTA} mt-4 w-fit`}>
+                  <span>Get started</span>
+                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                </Link>
               </div>
-              <span className="font-display text-base font-medium text-ink-primary">ScopeVanta</span>
-              <span className="text-xs text-ink-disabled font-mono">© {new Date().getFullYear()} All rights reserved.</span>
+
+              <div>
+                <p className="text-[11px] font-mono font-medium uppercase tracking-wider text-ink-secondary">Explore</p>
+                <nav className="mt-4 flex flex-col items-start gap-3 text-sm text-ink-muted font-body" aria-label="Footer navigation">
+                  <a href="#features" className="hover:text-accent-hover transition-colors">Capabilities</a>
+                  <a href="#pricing" className="hover:text-accent-hover transition-colors">Pricing &amp; plans</a>
+                </nav>
+              </div>
+
+              <div>
+                <p className="text-[11px] font-mono font-medium uppercase tracking-wider text-ink-secondary">Account</p>
+                <nav className="mt-4 flex flex-col items-start gap-3 text-sm text-ink-muted font-body" aria-label="Account navigation">
+                  <Link href="/sign-in" className="hover:text-accent-hover transition-colors">Sign in</Link>
+                  <Link href="/sign-up" className="hover:text-accent-hover transition-colors">Create an account</Link>
+                </nav>
+              </div>
             </div>
 
-            <div className="flex items-center gap-6 text-xs font-mono text-ink-muted">
-              <Link href="/sign-in" className="hover:text-ink-primary transition-colors">Sign In</Link>
-              <Link href="/sign-up" className="hover:text-ink-primary transition-colors">Register</Link>
-              <a href="#pricing" className="hover:text-ink-primary transition-colors">Subscription Styles</a>
+            <div className="flex flex-col gap-2 pt-5 text-[11px] font-mono text-ink-disabled sm:flex-row sm:items-center sm:justify-between">
+              <span>© {new Date().getFullYear()} ScopeVanta. All rights reserved.</span>
+              <span className="uppercase tracking-wider">Commercial clarity for service businesses</span>
             </div>
           </div>
         </footer>

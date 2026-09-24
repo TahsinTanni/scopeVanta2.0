@@ -62,7 +62,7 @@ export default function CompanyProfilePage() {
         title="Company Profile"
         description="Shared workspace-level business identity every proposal draws on."
       />
-      <Card className="max-w-4xl border-border-hairline bg-surface-1 p-6">
+      <Card className="sidebar-expandable max-w-4xl border-border-hairline bg-surface-1 p-6">
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div><Label>Full name</Label><Input value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} /></div>
           <div><Label>Email</Label><Input type="email" value={form.contactEmail} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} /></div>

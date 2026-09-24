@@ -106,7 +106,7 @@ export default function BillingPage() {
 
       <BentoCardGrid gridRef={gridRef} className="space-y-6">
         {/* Status card */}
-        <BentoCard className="max-w-5xl p-6" glowColor="78, 135, 112">
+        <BentoCard className="sidebar-expandable max-w-5xl p-6" glowColor="78, 135, 112">
           <div className="flex items-center justify-between border-b border-border-hairline pb-4">
             <div>
               <p className="text-xs text-ink-muted uppercase tracking-wider font-mono">Current Workspace Plan</p>
@@ -175,7 +175,7 @@ export default function BillingPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-5xl">
+          <div className="sidebar-expandable grid grid-cols-1 gap-4 max-w-5xl md:grid-cols-3">
             {PLANS.map((tier) => {
               const isCurrent = status.plan === tier.name;
               return (

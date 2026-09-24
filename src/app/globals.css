@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Let focused workspace pages use the extra desktop width released by the
+   collapsed navigation rail, without making their standard layout too wide. */
+main[data-sidebar-collapsed="true"] .sidebar-expandable {
+  max-width: none;
+}
+
 /* ==========================================================================
    Design tokens — "Forest Slate & Pale Linen"
    :root holds the light ("Pale Linen") values; .dark overrides them with the
