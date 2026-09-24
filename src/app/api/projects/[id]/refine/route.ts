@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
-import { aiGenerate, stripJsonFence } from "@/lib/ai";
+import { aiGenerate, parseModelJson } from "@/lib/ai";
 import { projectData } from "@/lib/project-data";
 
 // POST /api/projects/:id/refine — legacy/backend/index.ts:2494-2683.
@@ -30,13 +30,14 @@ export const POST = withErrors(async (req: Request, { params }: { params: Promis
 
   try {
     const r = await aiGenerate({
+      track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "refine" },
       system:
         "You are ScopeVanta, an elite B2B proposal director and scope architect. Refine an existing proposal using seller-supplied clarification answers. Treat answers as authoritative only for the question they address. Never invent facts, quantities, prices, credentials, dates or guarantees. Preserve unresolved items as To be confirmed. Improve buyer clarity and margin protection without adding unsupported claims.",
       prompt: `SELLER: ${profile.businessName}\nCLIENT: ${String(project.clientLabel || "Not provided")}\nORIGINAL BRIEF: ${String(project.brief || "")}\nBUDGET: ${String(project.budget || "Not provided")}\nTIMELINE: ${String(project.timeline || "Not provided")}\n\nCLARIFICATIONS:\n${resolved}\n\nPROPOSAL CUSTOMIZATION: ${JSON.stringify(requested)}\nKeep only the selected proposal sections, preserve the requested Concise/Detailed/Premium style, and include chart suggestions only when includeVisuals is true and supported by real numeric facts.\n\nCURRENT PROPOSAL:\n${String(project.proposal || "")}\n\nReturn ONLY JSON with summary (2 sentences), risks (array of 3-7 remaining material risks), proposal (complete revised client-ready proposal), grounding (array of material claims), visuals (array of at most 3 objects with type, title, labels and numeric values; empty when not requested or unsupported). Each grounding item must contain claim and kind. kind must be seller_fact, client_fact, assumption, or strategy. Preserve existing seller_fact sourceRecordIds only when the revised claim is still directly supported by the same persisted knowledge record; client_fact includes facts from the original brief, budget, timeline or clarification answers; assumption is an explicit assumption or To be confirmed item; strategy is ScopeVanta recommendation rather than fact. Reconcile the clarification answers throughout scope, deliverables, acceptance criteria, phases, timeline, client responsibilities, investment, assumptions, exclusions and change control. Remove resolved ambiguity, but do not silently resolve unanswered questions. Keep the proposal persuasive, specific and concise enough to be usable.`,
       maxTokens: 7600,
       temperature: 0.15,
     });
-    const out = JSON.parse(stripJsonFence(r.text)) as { summary: string; risks: string[]; proposal: string; grounding?: Array<{ claim: string; kind: string }>; visuals?: Array<{ type: string; title: string; labels: string[]; values: number[] }> };
+    const out = parseModelJson(r.text) as { summary: string; risks: string[]; proposal: string; grounding?: Array<{ claim: string; kind: string }>; visuals?: Array<{ type: string; title: string; labels: string[]; values: number[] }> };
     if (!out.summary || !Array.isArray(out.risks) || !out.proposal) return error("Incomplete refinement. Please retry.", 502);
 
     const previousGrounding = Array.isArray(project.evidence) ? (project.evidence as unknown as GroundingItem[]) : [];

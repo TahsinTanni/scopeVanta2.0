@@ -1,4 +1,4 @@
-import { aiExtract } from "@/lib/ai";
+import { aiExtract, type AiTrack } from "@/lib/ai";
 
 // Translated verbatim from legacy/backend/index.ts (retrievalStopWords,
 // retrievalTerms, rankKnowledge, knowledgeCategories, knowledgeSchema,
@@ -108,8 +108,9 @@ const knowledgeSchema = {
   ],
 };
 
-export async function structureKnowledge(text: string, name: string): Promise<KnowledgeIntelligence> {
+export async function structureKnowledge(text: string, name: string, track: AiTrack): Promise<KnowledgeIntelligence> {
   const r = await aiExtract<KnowledgeIntelligence>({
+    track,
     system:
       "Extract only explicit facts from the supplied business document. Never infer missing capabilities, prices, credentials, outcomes, clients, quantities, dates or guarantees. Keep uncertain or absent categories empty. Preserve important numbers and qualifiers in the fact strings.",
     prompt: `Organize the factual business knowledge from ${name}. Summary must be factual and concise. documentType should describe the document based only on its contents. pricingEvidence includes only explicit prices, budgets, rates, fees or commercial terms. proofPoints includes only explicit credentials, case-study facts, measured results or named evidence. clientFacts includes only facts clearly about a client, prospect or project rather than the seller.`,

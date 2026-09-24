@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
-import { aiGenerate, stripJsonFence } from "@/lib/ai";
+import { aiGenerate, parseModelJson } from "@/lib/ai";
 import { projectData, formatConfirmedFacts } from "@/lib/project-data";
 
 // POST /api/projects/:id/close-coach — legacy/backend/index.ts:4425-4493.
@@ -22,13 +22,14 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
 
   try {
     const r = await aiGenerate({
+      track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "close-coach" },
       system:
         "You are a B2B deal-closing coach. Help a service seller move a real opportunity forward without inventing buyer intent, urgency, proof, ROI, competitors or decision makers. Never recommend blind discounting. Missing facts become discovery questions. Historical win/loss patterns are hints, not guarantees.",
       prompt: `SELLER: ${profile.businessName}\nCLIENT: ${String(p.clientLabel || "")}\nDEAL STAGE: ${String(p.dealStage || "Draft")}\nDEAL VALUE: ${Number(p.dealValue || 0) || "Not recorded"}\nBRIEF: ${String(p.brief || "")}\nRISKS: ${((p.risks as string[]) || []).join(" | ")}\nWIN PLAN: ${JSON.stringify(d.winPlan || {})}\nPROPOSAL: ${String(p.proposal || "").slice(0, 22000)}\n${formatConfirmedFacts(p, d)}\nPAST OUTCOMES:\n${history || "No recorded win/loss learning yet."}\nReturn ONLY JSON: {nextBestAction:string,why:string,followUp:string,discoveryQuestions:string[],risk:string}. Give one concrete highest-leverage next action for the current stage. Follow-up must be client-ready and under 170 words. Sign the follow-up using exactly this name: ${profile.businessName} — never invent, guess, or substitute a different name or persona. For Draft or Proposal Ready, recommend discovery when needed rather than pretending the proposal was sent. In Negotiation, address known friction without automatic concessions.`,
       maxTokens: 1800,
       temperature: 0.2,
     });
-    const out = JSON.parse(stripJsonFence(r.text));
+    const out = parseModelJson(r.text);
     if (!out.nextBestAction || !out.followUp) return error("Closing guidance was incomplete. Please retry.", 502);
 
     const closeCoach = {

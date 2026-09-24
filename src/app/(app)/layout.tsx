@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { ToastProvider } from "@/components/Toast";
 import { NavigationGuardProvider } from "@/components/NavigationGuard";
 import Sidebar from "@/components/Sidebar";
+import { getStaffContext } from "@/lib/admin/auth";
 
 // Post-auth app shell — replaces legacy App.tsx's sidebar nav (dashboard /
 // new / projects / clients / files / company / billing) with real routes
@@ -21,17 +22,32 @@ const NAV = [
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  const { userId, orgId } = await auth();
+  const { userId, orgId, sessionClaims } = await auth();
   if (!userId) redirect("/sign-in");
   if (!orgId) redirect("/onboarding/workspace");
+
+  const workspace = await prisma.workspace.findUnique({ where: { id: orgId }, select: { suspendedAt: true } });
+  if (workspace?.suspendedAt) redirect("/suspended");
 
   const profile = await prisma.companyProfile.findUnique({ where: { workspaceId: orgId } });
   if (!profile?.onboarded) redirect("/onboarding");
 
+  // Platform staff get a link into /admin. getStaffContext() ignores
+  // view-as-customer sessions, so an impersonated customer never sees it.
+  const staff = await getStaffContext();
+  const nav = staff ? [...NAV, { href: "/admin", label: "Admin", icon: "admin_panel_settings" }] : NAV;
+  const viewingAsCustomer = Boolean(sessionClaims?.act);
+
   return (
     <ToastProvider>
     <NavigationGuardProvider>
-      <Sidebar nav={NAV}>{children}</Sidebar>
+      {viewingAsCustomer && (
+        <div role="status" className="no-print fixed inset-x-0 top-0 z-[60] flex h-8 items-center justify-center gap-2 bg-warning text-[11px] font-mono font-semibold uppercase tracking-wider text-[#1a1200]">
+          <span className="material-symbols-outlined text-[16px]">visibility</span>
+          Staff view-as-customer session · read-only · sign out when done
+        </div>
+      )}
+      <Sidebar nav={nav}>{children}</Sidebar>
     </NavigationGuardProvider>
     </ToastProvider>
   );

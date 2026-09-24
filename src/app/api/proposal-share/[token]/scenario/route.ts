@@ -8,7 +8,7 @@ type ShareData = { scenarios?: Array<{ name?: string }>; selectedScenario?: stri
 export const POST = withErrors(async (req: Request, { params }: { params: Promise<{ token: string }> }) => {
   const { token } = await params;
   const b = (await req.json().catch(() => ({}))) as { name?: string };
-  const s = await prisma.proposalShare.findUnique({ where: { token } });
+  const s = await prisma.proposalShare.findFirst({ where: { token, workspace: { suspendedAt: null } } });
   if (!s || s.token !== token || s.status === "revoked" || (s.expiresAt && s.status !== "accepted" && s.status !== "changes_requested" && s.expiresAt.getTime() < Date.now())) return error("This proposal link is unavailable.", 404);
   const d = s.data as ShareData;
   if (d.decision) return error("This proposal already has a recorded decision.", 409);

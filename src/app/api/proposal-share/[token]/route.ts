@@ -12,7 +12,7 @@ type ShareData = {
 export const GET = withErrors(async (_req: Request, { params }: { params: Promise<{ token: string }> }) => {
   const { token } = await params;
   if (!token) return error("Share link is invalid.", 400);
-  const s = await prisma.proposalShare.findUnique({ where: { token } });
+  const s = await prisma.proposalShare.findFirst({ where: { token, workspace: { suspendedAt: null } } });
   if (!s || s.token !== token || s.status === "revoked" || (s.expiresAt && s.status !== "accepted" && s.status !== "changes_requested" && s.expiresAt.getTime() < Date.now())) return error("This proposal link is unavailable.", 404);
   const d = s.data as ShareData;
 

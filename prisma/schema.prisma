@@ -30,21 +30,22 @@ model User {
 
   memberships            WorkspaceMember[]
   settings               UserSettings[]
-  sentInvites            WorkspaceInvite[] @relation("InviteSender")
-  invitedMembers         WorkspaceMember[] @relation("MemberInviter")
-  createdClients         Client[]          @relation("ClientCreator")
-  createdProjects        Project[]         @relation("ProjectCreator")
-  createdVersions        ProposalVersion[] @relation("VersionCreator")
-  uploadedFiles          KnowledgeFile[]   @relation("FileUploader")
-  createdRates           Rate[]            @relation("RateCreator")
-  createdBaselines       ScopeBaseline[]   @relation("BaselineCreator")
-  createdChangeOrders    ChangeOrder[]     @relation("ChangeOrderCreator")
-  approvedChangeOrders   ChangeOrder[]     @relation("ChangeOrderApprover")
+  sentInvites            WorkspaceInvite[]     @relation("InviteSender")
+  invitedMembers         WorkspaceMember[]     @relation("MemberInviter")
+  createdClients         Client[]              @relation("ClientCreator")
+  createdProjects        Project[]             @relation("ProjectCreator")
+  createdVersions        ProposalVersion[]     @relation("VersionCreator")
+  uploadedFiles          KnowledgeFile[]       @relation("FileUploader")
+  createdRates           Rate[]                @relation("RateCreator")
+  createdBaselines       ScopeBaseline[]       @relation("BaselineCreator")
+  createdChangeOrders    ChangeOrder[]         @relation("ChangeOrderCreator")
+  approvedChangeOrders   ChangeOrder[]         @relation("ChangeOrderApprover")
   analyticsEvents        AnalyticsEvent[]
-  createdProposalShares  ProposalShare[]   @relation("ProposalShareCreator")
-  createdDiscoveryShares DiscoveryShare[]  @relation("DiscoveryShareCreator")
+  createdProposalShares  ProposalShare[]       @relation("ProposalShareCreator")
+  createdDiscoveryShares DiscoveryShare[]      @relation("DiscoveryShareCreator")
   commercialAudits       CommercialAudit[]
   supportConversations   SupportConversation[]
+  platformStaff          PlatformStaff?
 
   @@map("users")
 }
@@ -56,25 +57,31 @@ model Workspace {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  members             WorkspaceMember[]
-  invites             WorkspaceInvite[]
-  companyProfile      CompanyProfile?
-  userSettings        UserSettings[]
-  clients             Client[]
-  projects            Project[]
-  knowledgeFiles      KnowledgeFile[]
-  knowledgeRecords    KnowledgeRecord[]
-  rates               Rate[]
-  scopeBaselines      ScopeBaseline[]
-  changeOrders        ChangeOrder[]
-  analyticsEvents     AnalyticsEvent[]
-  proposalShares      ProposalShare[]
-  discoveryShares     DiscoveryShare[]
-  billingSubscription BillingSubscription?
-  billingEvents       BillingEvent[]
-  commercialAudits    CommercialAudit[]
-  proposalVersions    ProposalVersion[]
+  members              WorkspaceMember[]
+  invites              WorkspaceInvite[]
+  companyProfile       CompanyProfile?
+  userSettings         UserSettings[]
+  clients              Client[]
+  projects             Project[]
+  knowledgeFiles       KnowledgeFile[]
+  knowledgeRecords     KnowledgeRecord[]
+  rates                Rate[]
+  scopeBaselines       ScopeBaseline[]
+  changeOrders         ChangeOrder[]
+  analyticsEvents      AnalyticsEvent[]
+  proposalShares       ProposalShare[]
+  discoveryShares      DiscoveryShare[]
+  billingSubscription  BillingSubscription?
+  billingEvents        BillingEvent[]
+  commercialAudits     CommercialAudit[]
+  proposalVersions     ProposalVersion[]
   supportConversations SupportConversation[]
+  aiUsageEvents        AiUsageEvent[]
+
+  // Platform-staff suspension (admin panel). While set, every authenticated
+  // workspace request and public share link for this workspace is refused.
+  suspendedAt     DateTime? @map("suspended_at")
+  suspendedReason String?   @map("suspended_reason")
 
   @@map("workspaces")
 }
@@ -550,6 +557,12 @@ model BillingSubscription {
   chargedThroughDate   DateTime?   @map("charged_through_date")
   billingAction        String?     @map("billing_action")
   lastBillingEvent     String?     @map("last_billing_event")
+  // Staff-granted overrides (admin panel). compPlan = free internal/partner
+  // access that skips Square entitlement checks entirely; limitOverride
+  // replaces the plan's monthly proposal limit when set.
+  compPlan             Boolean     @default(false) @map("comp_plan")
+  compNote             String?     @map("comp_note")
+  limitOverride        Int?        @map("limit_override")
   createdAt            DateTime    @default(now()) @map("created_at")
   updatedAt            DateTime    @updatedAt @map("updated_at")
 
@@ -612,17 +625,120 @@ model CommercialAudit {
 }
 
 model SupportConversation {
-  id            String   @id @default(cuid())
-  workspaceId   String   @map("workspace_id")
-  userId        String?  @map("user_id")
+  id            String    @id @default(cuid())
+  workspaceId   String    @map("workspace_id")
+  userId        String?   @map("user_id")
   // Array<{ role: "user" | "assistant"; text: string; at: string }>
   messages      Json
-  lastMessageAt DateTime @default(now()) @map("last_message_at")
-  createdAt     DateTime @default(now()) @map("created_at")
+  lastMessageAt DateTime  @default(now()) @map("last_message_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  // Staff triage (admin panel): "open" | "resolved", plus internal notes
+  // that are never shown to the customer.
+  status        String    @default("open")
+  staffNotes    String?   @map("staff_notes") @db.Text
+  resolvedAt    DateTime? @map("resolved_at")
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([workspaceId, lastMessageAt])
+  @@index([status, lastMessageAt])
   @@map("support_conversations")
+}
+
+// ---------------------------------------------------------------------------
+// Platform administration (ScopeVanta staff — NOT workspace Owner/Admin)
+// ---------------------------------------------------------------------------
+//
+// Platform staff operate the whole product across every workspace. This is a
+// separate axis from WorkspaceRole: a workspace ADMIN manages one customer's
+// team; platform staff manage the platform. The two never share a check.
+
+enum StaffRole {
+  SUPER_ADMIN // everything, including managing other staff
+  SUPPORT // read-only across workspaces + support inbox + view-as-customer
+  BILLING // billing operations: comp plans, limits, trials, Square resync
+
+  @@map("staff_role")
+}
+
+// One row per staff member. Revocation sets revoked_at instead of deleting,
+// so the grant history stays attributable. Granted only by an existing
+// SUPER_ADMIN (or, for the very first one, scripts/grant-staff.mjs).
+model PlatformStaff {
+  id              String    @id @default(cuid())
+  userId          String    @unique @map("user_id")
+  role            StaffRole
+  grantedByUserId String?   @map("granted_by_user_id")
+  revokedAt       DateTime? @map("revoked_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("platform_staff")
+}
+
+// Append-only record of every staff action. Deliberately has NO foreign keys
+// so entries survive deletion of the workspace/user they describe; a DB
+// trigger (see migration) rejects UPDATE and DELETE on this table.
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String   @map("actor_user_id")
+  actorEmail  String   @map("actor_email")
+  action      String
+  targetType  String?  @map("target_type")
+  targetId    String?  @map("target_id")
+  workspaceId String?  @map("workspace_id")
+  details     Json?
+  ip          String?
+  userAgent   String?  @map("user_agent")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("admin_audit_log")
+}
+
+// Feature switches. scope is "global" or a workspace id; a workspace row
+// overrides the global row for that workspace. Keys are defined in code
+// (lib/flags.ts), so an unknown key here is simply ignored.
+model FeatureFlag {
+  id              String   @id @default(cuid())
+  key             String
+  scope           String
+  enabled         Boolean
+  reason          String?
+  updatedByUserId String?  @map("updated_by_user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([key, scope])
+  @@map("feature_flags")
+}
+
+// One row per Anthropic API call, for per-workspace usage/cost reporting and
+// AI health monitoring. Token counts are stored raw; cost is derived at read
+// time from lib/admin/ai-pricing.ts so a price change needs no backfill.
+model AiUsageEvent {
+  id               String   @id @default(cuid())
+  workspaceId      String?  @map("workspace_id")
+  userId           String?  @map("user_id")
+  feature          String
+  model            String
+  inputTokens      Int      @default(0) @map("input_tokens")
+  outputTokens     Int      @default(0) @map("output_tokens")
+  cacheReadTokens  Int      @default(0) @map("cache_read_tokens")
+  cacheWriteTokens Int      @default(0) @map("cache_write_tokens")
+  success          Boolean
+  errorMessage     String?  @map("error_message")
+  durationMs       Int      @map("duration_ms")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([createdAt])
+  @@map("ai_usage_events")
 }

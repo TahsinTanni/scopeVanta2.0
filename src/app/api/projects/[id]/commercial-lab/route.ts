@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
-import { aiGenerate, stripJsonFence } from "@/lib/ai";
+import { aiGenerate, parseModelJson } from "@/lib/ai";
 import { projectData, formatConfirmedFacts } from "@/lib/project-data";
 
 // POST /api/projects/:id/commercial-lab — legacy/backend/index.ts:3046-3234.
@@ -42,13 +42,14 @@ export const POST = withErrors(async (req: Request, { params }: { params: Promis
 
   try {
     const r = await aiGenerate({
+      track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "commercial-lab" },
       system:
         "You are ScopeVanta Commercial Intelligence. Engineer profitable, winnable service scopes from supplied facts. Never invent client requirements, team capacity, historical performance, rates, ROI or acceptance. Mark missing facts To be confirmed. Historical patterns are descriptive hints only. Distinguish included, ambiguous and out-of-scope work. Negotiation advice must protect value and scope rather than defaulting to discounting.",
       prompt: `SELLER: ${profile.businessName}\nEXPERTISE: ${profile.expertise}\nCLIENT: ${p.clientLabel}\nBRIEF: ${p.brief}\nPROPOSAL: ${String(p.proposal || "").slice(0, 26000)}\n${formatConfirmedFacts(p, d)}\nRISKS: ${((p.risks as string[]) || []).join(" | ")}\nQUESTIONS: ${((p.clarificationQuestions as string[]) || []).join(" | ")}\nBUDGET: ${p.budget || "Not provided"}\nTIMELINE: ${p.timeline || "Not provided"}\nINTERNAL COST/RATE PER HOUR: ${internalRate || "Not provided"}\nTARGET GROSS MARGIN %: ${targetMargin}\nAVAILABLE DELIVERY HOURS: ${teamCapacityHours || "Not provided"}\nACTUAL HOURS IF COMPLETED: ${Number(b.actualHours || 0) || "Not provided"}\nACTUAL COST IF COMPLETED: ${Number(b.actualCost || 0) || "Not provided"}\nNEW CLIENT REQUEST TO CHECK: ${String(b.changeRequest || "Not provided").slice(0, 5000)}\nNEGOTIATION MESSAGE: ${String(b.negotiationMessage || "Not provided").slice(0, 5000)}\nSCENARIO PRICE: ${Number(b.scenarioPrice || 0) || "Not provided"}\nSCENARIO HOURS: ${Number(b.scenarioHours || 0) || "Not provided"}\nHISTORICAL OUTCOMES: ${JSON.stringify(history).slice(0, 12000)}\nReturn ONLY JSON with: pricing {estimatedHours:number,estimatedCost:number,recommendedPrice:number,minimumSafePrice:number,expectedMarginPct:number,contingencyPct:number,basis:string[]}; scope {phases:Array<{name:string,deliverables:string[],tasks:string[],acceptanceCriteria:string[]}>,assumptions:string[],dependencies:string[],clientResponsibilities:string[],exclusions:string[]}; changeDetection {classification:'Included'|'Ambiguous'|'Out of Scope'|'Not assessed',reason:string,estimatedExtraHours:number,changeOrderRecommendation:string}; simulator {scenarioPrice:number,scenarioHours:number,marginPct:number,riskImpact:string,tradeoffs:string[]}; historical {signals:string[],sampleSize:number}; intake {requirements:string[],contradictions:string[],deadlines:string[],openQuestions:string[]}; traceability Array<{requirement:string,coverage:'Covered'|'Ambiguous'|'Unanswered',proposalSection:string,evidence:string,acceptanceCriterion:string}>; feasibility {status:'Feasible'|'At Risk'|'Unknown',estimatedHours:number,capacityHours:number,bottlenecks:string[]}; negotiation {recommendedApproach:string,protect:string[],giveGetTrades:string[],responseDraft:string}; memory {estimatedVsActual:string,lessons:string[],futurePricingAdjustment:string}. Calculations must be internally consistent. If internal rate is absent, do not invent cost or safe price: use 0 and explain the missing basis. If actuals are absent, say no completed-project learning yet. If no new request or negotiation message is supplied, return Not assessed/empty guidance rather than inventing one. Trace every material stated client requirement, capped at 25.`,
       maxTokens: 7600,
       temperature: 0.15,
     });
-    const lab = JSON.parse(stripJsonFence(r.text));
+    const lab = parseModelJson(r.text);
     if (!lab.scope || !lab.pricing || !Array.isArray(lab.traceability)) return error("Commercial intelligence was incomplete. Please retry.", 502);
 
     const estimatedHours = Math.max(0, Number(lab.pricing?.estimatedHours || lab.feasibility?.estimatedHours || 0));

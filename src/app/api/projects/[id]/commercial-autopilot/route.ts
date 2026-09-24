@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
-import { aiGenerate, stripJsonFence } from "@/lib/ai";
+import { aiGenerate, parseModelJson } from "@/lib/ai";
 import { projectData, formatConfirmedFacts } from "@/lib/project-data";
 
 // POST /api/projects/:id/commercial-autopilot — legacy/backend/index.ts:2970-3045.
@@ -33,13 +33,14 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
 
   try {
     const r = await aiGenerate({
+      track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "commercial-autopilot" },
       system:
         "You are ScopeVanta Commercial Autopilot. Recommend actions from supplied evidence only. Never invent client intent, capacity, costs, results or contractual status. Similar projects are descriptive references, not predictions.",
       prompt: `CURRENT OPPORTUNITY: ${JSON.stringify({ client: p.clientLabel, brief: p.brief, score: p.riskScore, risks: p.risks, questions: p.clarificationQuestions, dealStage: p.dealStage, dealValue: p.dealValue, commercialLab: d.commercialLab, estimateSummary: d.estimateSummary, actualHours: d.actualHours, actualCost: d.actualCost, scopeBaseline: d.scopeBaseline, lastClientRequest: d.clientRequestInbox || d.lastChangeRequest, proposalVersion: p.currentVersion, shareStatus: d.shareStatus }).slice(0, 30000)}\n${formatConfirmedFacts(p, d)}\nCOMPARABLE COMPLETED RECORDS: ${JSON.stringify(comparable).slice(0, 10000)}\nReturn ONLY JSON: autopilot {actions:Array<{priority:number,action:string,why:string,evidence:string,module:string}>,blockers:string[]}; calibration {estimatedVsActualSignals:string[],suggestedAdjustment:string}; redline {baseline:string[],requested:string[],commercialImpact:string[]}; negotiationScenarios:Array<{name:string,price:number,scopeTrade:string,marginImpact:string}>; handoff {status:string,agreedScope:string[],commercialTerms:string[],openItems:string[]}; similarity Array<{label:string,reason:string,estimatedVsActual:string}>; profitability {quotedValue:number,estimatedCost:number,actualCost:number,forecastCost:number,estimatedMarginPct:number,actualMarginPct:number,scopeAdded:string[],changeOrders:string[]}. Cap actions 6, similarities 5, negotiation scenarios 4. If data is absent say To be confirmed or return empty arrays.`,
       maxTokens: 5200,
       temperature: 0.15,
     });
-    const intelligence = JSON.parse(stripJsonFence(r.text));
+    const intelligence = parseModelJson(r.text);
 
     await prisma.commercialAudit.create({
       data: { workspaceId: ctx.workspaceId, projectId: id, performedByUserId: ctx.userId, action: "commercial_autopilot", payload: { detail: "Autopilot, calibration, redline, similarity and profitability intelligence refreshed." } },

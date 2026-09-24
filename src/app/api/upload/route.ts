@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth, requireRole } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
+import { assertFeatureEnabled } from "@/lib/flags";
 import { storageWrite, storageDelete } from "@/lib/storage";
 import { aiGenerate, aiOcr } from "@/lib/ai";
 import { structureKnowledge, knowledgeCategories } from "@/lib/knowledge";
@@ -15,6 +16,7 @@ type UploadBody = { name?: string; type?: string; content?: string; kind?: "logo
 
 export const POST = withErrors(async (req: Request) => {
   const ctx = await requireWorkspaceAuth();
+  await assertFeatureEnabled("uploads", ctx.workspaceId);
   const b = (await req.json().catch(() => ({}))) as UploadBody;
   if (!b.content || !b.name || !b.kind) return error("Missing file.", 400);
   if (b.kind === "client_logo" && !b.clientId) return error("Choose a saved client before uploading a client logo.", 400);
@@ -67,6 +69,7 @@ export const POST = withErrors(async (req: Request) => {
     } else if (/\.pdf$/i.test(safe) || contentType === "application/pdf") {
       try {
         const pdf = await aiGenerate({
+          track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "file-upload" },
           system:
             "You are a document transcription engine. Extract only text that is actually present in the supplied PDF. Preserve headings, lists, numbers and important table content. Do not summarize, infer, correct, embellish or add facts. If text is unreadable, omit it.",
           prompt: "Transcribe the readable text in this PDF for a private business knowledge base. Return plain text only.",
@@ -93,6 +96,7 @@ export const POST = withErrors(async (req: Request) => {
     ) {
       try {
         const word = await aiGenerate({
+          track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "file-upload" },
           system:
             "You are a document transcription engine. Extract only text that is actually present in the supplied Word document bytes. Preserve headings, lists, numbers and important table content. Do not summarize, infer, correct, embellish or add facts. Ignore archive metadata and binary noise. If meaningful document text cannot be recovered, return an empty response.",
           prompt: `Recover the readable business-document text from this ${safe.toLowerCase().endsWith(".docx") ? "DOCX" : "DOC"} file. The following is a base64 representation of the original file bytes. Return plain document text only.\n\n${b.content}`,
@@ -119,6 +123,7 @@ export const POST = withErrors(async (req: Request) => {
     } else if (contentType.startsWith("image/")) {
       try {
         const imageText = await aiOcr({
+          track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "file-upload" },
           system:
             "You are a document transcription engine. Transcribe only business-relevant text that is actually visible in the supplied image. Preserve headings, labels, numbers and table-like content. Do not summarize, infer, correct, embellish or add facts.",
           prompt: "Transcribe the readable text in this image for a private business knowledge base. Return plain text only.",
@@ -143,7 +148,7 @@ export const POST = withErrors(async (req: Request) => {
 
     if (status === "ready" && extractedText.trim()) {
       try {
-        intelligence = await structureKnowledge(extractedText, safe);
+        intelligence = await structureKnowledge(extractedText, safe, { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "file-upload.structure" });
         intelligenceStatus = "ready";
       } catch (e) {
         console.warn("Knowledge structuring unavailable", e);

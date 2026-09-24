@@ -35,6 +35,7 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
       extractionMethod = "text";
     } else if (/\.pdf$/i.test(file.fileName) || file.mimeType === "application/pdf") {
       const pdf = await aiGenerate({
+        track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "file-reprocess" },
         system:
           "You are a document transcription engine. Extract only text actually present in the supplied PDF. Preserve headings, lists, numbers and important table content. Do not summarize or infer facts.",
         prompt: "Transcribe the readable text in this PDF. Return plain text only.",
@@ -52,6 +53,7 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
       file.mimeType === "application/msword"
     ) {
       const word = await aiGenerate({
+        track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "file-reprocess" },
         system:
           "You are a document transcription engine. Extract only text actually present in the supplied Word document bytes. Preserve headings, lists, numbers and table content. Ignore archive metadata and binary noise. Return empty text if reliable document text cannot be recovered.",
         prompt: `Recover readable business-document text from ${file.fileName}. Base64 original bytes follow. Return plain text only.\n\n${stored.content}`,
@@ -68,6 +70,7 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
       extractionMethod = file.fileName.toLowerCase().endsWith(".docx") ? "docx-ai" : "doc-ai";
     } else if (file.mimeType.startsWith("image/")) {
       const imageText = await aiOcr({
+        track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "file-reprocess" },
         system:
           "Transcribe only business-relevant text actually visible in the image. Preserve headings, labels, numbers and table-like content. Do not infer facts.",
         prompt: "Transcribe readable text for the private business knowledge base. Return plain text only.",
@@ -92,7 +95,7 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
 
   let intelligence;
   try {
-    intelligence = await structureKnowledge(extractedText, file.fileName);
+    intelligence = await structureKnowledge(extractedText, file.fileName, { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "file-reprocess.structure" });
   } catch (e) {
     console.warn("Knowledge reprocessing structuring failed", e);
     return error("Text was extracted, but structured knowledge could not be rebuilt. Existing knowledge was left unchanged.", 502);

@@ -67,7 +67,8 @@ export default function BillingPage() {
   }
 
   if (!status) return <p className="text-sm font-mono text-ink-muted">Loading…</p>;
-  const active = status.billing.status === "verified_active";
+  // "complimentary" = a free plan granted by ScopeVanta staff (admin panel).
+  const active = status.billing.status === "verified_active" || status.billing.status === "complimentary";
 
   return (
     <div className="space-y-6">

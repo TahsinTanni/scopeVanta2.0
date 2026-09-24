@@ -1,11 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
+import { assertFeatureEnabled } from "@/lib/flags";
 import { projectData } from "@/lib/project-data";
 
 // POST /api/projects/:id/discovery-share — legacy/backend/index.ts:3691-3734.
 export const POST = withErrors(async (_req: Request, { params }: { params: Promise<{ id: string }> }) => {
   const ctx = await requireWorkspaceAuth();
+  await assertFeatureEnabled("sharing", ctx.workspaceId);
   const { id } = await params;
   const p = await prisma.project.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
   if (!p) return error("Opportunity not found.", 404);

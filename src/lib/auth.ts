@@ -74,6 +74,11 @@ export async function requireWorkspaceAuth(): Promise<WorkspaceContext> {
     }
   }
 
+  // Suspended by platform staff (admin panel): refuse every workspace request.
+  if (workspace.suspendedAt) {
+    throw new HttpError("This workspace has been suspended. Contact ScopeVanta support for help.", 403);
+  }
+
   let member = await prisma.workspaceMember.findUnique({
     where: { workspaceId_userId: { workspaceId: orgId, userId } },
   });

@@ -21,9 +21,9 @@ export const GET = withErrors(async () => {
     trialStartedAt: sub?.trialStartedAt?.toISOString() || "",
     trialEndsAt: sub?.trialEndsAt?.toISOString() || state.trialEndsAt || "",
     chargedThroughDate: sub?.chargedThroughDate?.toISOString() || "",
-    requiresAction: !devBypass && sub?.status !== "verified_active",
-    action: devBypass ? "" : sub?.billingAction || "",
+    requiresAction: !devBypass && !sub?.compPlan && sub?.status !== "verified_active",
+    action: devBypass || sub?.compPlan ? "" : sub?.billingAction || "",
     lastBillingEvent: sub?.lastBillingEvent || "",
-    lifecycle: sub?.status || "trial_setup",
+    lifecycle: sub?.compPlan ? "complimentary" : sub?.status || "trial_setup",
   });
 });

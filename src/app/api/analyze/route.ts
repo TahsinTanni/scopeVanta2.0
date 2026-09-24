@@ -1,9 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
-import { json, error, withErrors } from "@/lib/http";
-import { aiGenerate, aiScrape, stripJsonFence } from "@/lib/ai";
+import { json, error, withErrors, HttpError } from "@/lib/http";
+import { aiGenerate, aiScrape, parseModelJson } from "@/lib/ai";
 import { rankKnowledge, type KnowledgeRecordContent } from "@/lib/knowledge";
 import { PLAN_LIMITS, verifyEntitlement, billingDateAdvanced, hasDevEntitlementBypass } from "@/lib/square";
+import { COMP_PLAN_LIMIT } from "@/lib/billing";
 
 // POST /api/analyze — legacy/backend/index.ts:2130-2493. The AI system/user
 // prompt text is preserved verbatim; only the plumbing (workspace-scoped
@@ -37,12 +38,14 @@ export const POST = withErrors(async (req: Request) => {
 
   const devBypass = hasDevEntitlementBypass();
   let sub = await prisma.billingSubscription.findUnique({ where: { workspaceId: ctx.workspaceId } });
-  if (!devBypass && !sub?.checkoutStartedAt) return error("Start your Square subscription checkout to activate the trial.", 402);
+  // Staff-granted free plans (admin panel) skip Square entitlement entirely.
+  const comp = sub?.compPlan === true;
+  if (!devBypass && !comp && !sub?.checkoutStartedAt) return error("Start your Square subscription checkout to activate the trial.", 402);
 
   try {
     const lastVerified = sub?.verifiedAt ? sub.verifiedAt.getTime() : 0;
     const verificationStale = Date.now() - lastVerified > 15 * 60 * 1000;
-    if (!devBypass && (sub?.status !== "verified_active" || verificationStale)) {
+    if (!devBypass && !comp && (sub?.status !== "verified_active" || verificationStale)) {
       const verified = await verifyEntitlement(ctx.workspaceId);
       const chargedThroughDateStr = String(verified?.charged_through_date || sub?.chargedThroughDate?.toISOString() || "");
       const paymentRecovery = sub?.status === "payment_failed" && billingDateAdvanced(sub?.chargedThroughDate, chargedThroughDateStr);
@@ -89,7 +92,10 @@ export const POST = withErrors(async (req: Request) => {
   cutoff.setDate(1);
   cutoff.setHours(0, 0, 0, 0);
   const used = await prisma.project.count({ where: { workspaceId: ctx.workspaceId, createdAt: { gte: cutoff } } });
-  const max = devBypass ? 1_000_000 : PLAN_LIMITS[(sub?.plan as "Freelancer" | "Pro" | "Agency") || "Freelancer"] || 10;
+  // A staff-set limit override always wins, even over the dev entitlement bypass.
+  const max =
+    sub?.limitOverride ??
+    (devBypass ? 1_000_000 : comp ? COMP_PLAN_LIMIT : PLAN_LIMITS[(sub?.plan as "Freelancer" | "Pro" | "Agency") || "Freelancer"] || 10);
   if (used >= max) return error(`Your ${sub?.plan || "Freelancer"} monthly limit has been reached. Upgrade to continue.`, 402);
 
   let websiteContext = "";
@@ -156,13 +162,14 @@ export const POST = withErrors(async (req: Request) => {
 
   try {
     const r = await aiGenerate({
+      track: { workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "analyze" },
       system:
         "You are ScopeVanta, an elite B2B sales strategist, scope architect, commercial proposal director and delivery-risk reviewer for service businesses. Your job is to help the seller win the right deal without winning unprofitable work. Diagnose buyer priorities, decision friction, scope ambiguity, delivery dependencies, margin exposure and negotiation leverage before writing. Never fabricate facts, credentials, testimonials, pricing, quantities or guarantees. Separate confirmed facts from assumptions. Unknown requirements must be explicitly marked To be confirmed. Prefer precise commitments, measurable acceptance criteria and buyer-friendly language over generic marketing copy. Every recommendation must improve win probability, commercial clarity or margin protection.",
       prompt: `SELLER: ${profile.businessName}\nEXPERTISE: ${profile.expertise}\nWEBSITE: ${websiteContext || "Not available"}\nKNOWLEDGE FILES: ${fileContext || "No readable text files supplied"}\nCLIENT: ${x.client || "Not provided"}\nSAVED CLIENT CONTEXT: ${clientContext || "No saved client context"}\nBUDGET: ${x.budget || "Not provided"}\nTIMELINE: ${x.timeline || "Not provided"}\nBRIEF: ${brief}\n\nPROPOSAL MODE: ${proposalMode}\nINCLUDE ONLY THESE CLIENT-FACING SECTIONS: ${proposalSections.join(" | ")}\nVISUALS REQUESTED: ${requested.includeVisuals ? "Yes" : "No"}\n\nReturn ONLY JSON: score integer 0-100 where higher means greater scope/commercial risk; summary 2 sentences that state the opportunity and the biggest commercial issue; risks 5-7 specific items prioritized by impact; questions 5-8 high-value clarification questions that materially change scope, price, timeline, acceptance or buying confidence; proposal client-ready plain text containing only the requested sections; grounding array; visuals array. Each grounding item must contain claim, kind, sourceRecordIds, confidence. kind must be seller_fact, client_fact, assumption, or strategy. For seller_fact, cite only KNOWLEDGE_ID values that directly support that exact claim; never cite a merely related fact. client_fact is information supplied in the client brief, client field, budget or timeline and uses no knowledge IDs. assumption is an explicit proposal assumption or To be confirmed item and uses no knowledge IDs. strategy is ScopeVanta advice/recommended framing rather than a factual claim and uses no knowledge IDs. confidence must respectively be grounded, client_supplied, assumption, or recommendation. Include the material factual/assumption/strategy claims used in the proposal, capped at 30 grounding items. Each visual object must contain type, title, labels string array and values number array. If visuals were not requested, return an empty visuals array. If visuals are requested, create at most 3 useful charts only from numeric facts actually supplied in the brief, budget or timeline; never invent chart data. If there is insufficient numeric data, return an empty visuals array. Before drafting, internally distinguish confirmed scope, assumptions, dependencies, exclusions, acceptance criteria, buyer outcomes and unresolved decisions. Do not expose chain-of-thought. Honor the requested section list exactly: omit unselected client-facing sections rather than silently adding them. In Concise mode keep selected sections tight and decision-oriented; Detailed mode should be operationally specific; Premium mode should be polished and executive-ready while remaining factual. Make the opening buyer-focused and specific to the stated problem. Translate deliverables into buyer outcomes without inventing ROI. Scope deliverables with enough specificity that a delivery team could understand what is included. Where quantities, platforms, revision counts, integrations, content responsibilities or approval timing are unknown, write To be confirmed instead of guessing. Investment must use the supplied budget only when it is clearly a confirmed project price; otherwise label pricing To be confirmed and explain the pricing basis needed. Timeline must distinguish target dates from dependencies. Acceptance criteria must be observable. Assumptions and exclusions must actively prevent scope creep. Change control must define how out-of-scope requests are identified, estimated and approved before work begins. WHY section may use only seller facts supplied in profile, website or knowledge context. Finish with a concrete, low-friction next step and acceptance path. Avoid filler, hype, repeated ideas and generic AI-sounding language.`,
       maxTokens: 7600,
       temperature: 0.2,
     });
-    const out = JSON.parse(stripJsonFence(r.text)) as {
+    const out = parseModelJson(r.text) as {
       score: number; summary: string; risks: string[]; questions: string[]; proposal: string;
       grounding?: Array<{ claim: string; kind: string; sourceRecordIds?: string[]; confidence?: string }>;
       visuals?: Array<{ type: string; title: string; labels: string[]; values: number[] }>;
@@ -215,9 +222,11 @@ export const POST = withErrors(async (req: Request) => {
     });
 
     return json({ ...project, projectId: project.id, usage: { used: used + 1, limit: max } });
-  } catch (e: any) {
+  } catch (e) {
+    // Customer-facing errors stay generic; the real cause goes to the server
+    // log (and, for AI failures, to the admin panel's Health page).
+    if (e instanceof HttpError) return error(e.message, e.status);
     console.error("ScopeVanta analysis failed", e);
-    const detail = e?.message || e?.error?.message || String(e);
-    return error(`Analysis service temporarily unavailable: ${detail}`, 502);
+    return error("We couldn't generate this proposal just now. Please try again in a moment.", 502);
   }
 });

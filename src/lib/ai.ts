@@ -1,4 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { prisma } from "@/lib/prisma";
+import { assertFeatureEnabled } from "@/lib/flags";
 
 // Replaces AppDeploy's `ai.generate` / `ai.extract` / `ai.ocr` / `ai.scrape`
 // (legacy/backend/index.ts) with equivalent Anthropic API calls. Every
@@ -35,6 +37,50 @@ function anthropic() {
 
 type ImageInput = { data: string; mimeType: string };
 
+/**
+ * Who a call is for. Required on every call so usage is attributable per
+ * workspace in the admin panel, and so the "ai" feature switch (global or
+ * per-workspace) is enforced in this one place rather than in each route.
+ */
+export type AiTrack = { workspaceId: string; userId?: string | null; feature: string };
+
+async function recordUsage(track: AiTrack, startedAt: number, usage: Anthropic.Messages.Usage | null, err?: unknown) {
+  try {
+    await prisma.aiUsageEvent.create({
+      data: {
+        workspaceId: track.workspaceId,
+        userId: track.userId ?? null,
+        feature: track.feature,
+        model: MODEL,
+        inputTokens: usage?.input_tokens ?? 0,
+        outputTokens: usage?.output_tokens ?? 0,
+        cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
+        cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
+        success: !err,
+        errorMessage: err ? String(err instanceof Error ? err.message : err).slice(0, 500) : null,
+        durationMs: Date.now() - startedAt,
+      },
+    });
+  } catch (e) {
+    // Usage logging must never break the customer's request.
+    console.error("AI usage logging failed", e);
+  }
+}
+
+/** Runs one Anthropic call behind the "ai" feature switch and logs its token usage. */
+async function trackedCall(track: AiTrack, call: () => Promise<Anthropic.Messages.Message>) {
+  await assertFeatureEnabled("ai", track.workspaceId);
+  const startedAt = Date.now();
+  try {
+    const response = await call();
+    await recordUsage(track, startedAt, response.usage);
+    return response;
+  } catch (e) {
+    await recordUsage(track, startedAt, null, e);
+    throw e;
+  }
+}
+
 type GenerateArgs = {
   system: string;
   prompt?: string;
@@ -43,6 +89,7 @@ type GenerateArgs = {
   maxTokens: number;
   temperature: number;
   maxRetries?: number;
+  track: AiTrack;
 };
 
 function imageBlocks(images?: ImageInput[]) {
@@ -88,13 +135,15 @@ export async function aiGenerate(args: GenerateArgs): Promise<{ text: string }> 
     const messages: Anthropic.Messages.MessageParam[] = args.messages?.length
       ? args.messages.map((m) => ({ role: m.role, content: m.content }))
       : [{ role: "user", content: userBlocks }];
-    const response = await anthropic().messages.create({
-      model: MODEL,
-      system: [{ type: "text", text: args.system, cache_control: { type: "ephemeral" } }],
-      messages,
-      max_tokens: Math.max(args.maxTokens || 4096, 16000),
-      thinking: { type: "disabled" },
-    });
+    const response = await trackedCall(args.track, () =>
+      anthropic().messages.create({
+        model: MODEL,
+        system: [{ type: "text", text: args.system, cache_control: { type: "ephemeral" } }],
+        messages,
+        max_tokens: Math.max(args.maxTokens || 4096, 16000),
+        thinking: { type: "disabled" },
+      }),
+    );
     const text = response.content
       .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
       .map((b) => b.text)
@@ -116,26 +165,29 @@ type ExtractArgs = {
   maxTokens: number;
   temperature: number;
   maxRetries?: number;
+  track: AiTrack;
 };
 
 /** Equivalent of legacy `ai.extract` — forces structured output via tool-use against the given JSON schema. */
 export async function aiExtract<T>(args: ExtractArgs): Promise<{ data: T }> {
   return withRetries(async () => {
-    const response = await anthropic().messages.create({
-      model: MODEL,
-      system: [{ type: "text", text: args.system, cache_control: { type: "ephemeral" } }],
-      messages: [{ role: "user", content: `${args.prompt}\n\nDOCUMENT:\n${args.content}` }],
-      max_tokens: Math.max(args.maxTokens || 4096, 16000),
-      thinking: { type: "disabled" },
-      tools: [
-        {
-          name: "extract",
-          description: "Return the extracted structured knowledge.",
-          input_schema: args.schema as Anthropic.Messages.Tool.InputSchema,
-        },
-      ],
-      tool_choice: { type: "tool", name: "extract" },
-    });
+    const response = await trackedCall(args.track, () =>
+      anthropic().messages.create({
+        model: MODEL,
+        system: [{ type: "text", text: args.system, cache_control: { type: "ephemeral" } }],
+        messages: [{ role: "user", content: `${args.prompt}\n\nDOCUMENT:\n${args.content}` }],
+        max_tokens: Math.max(args.maxTokens || 4096, 16000),
+        thinking: { type: "disabled" },
+        tools: [
+          {
+            name: "extract",
+            description: "Return the extracted structured knowledge.",
+            input_schema: args.schema as Anthropic.Messages.Tool.InputSchema,
+          },
+        ],
+        tool_choice: { type: "tool", name: "extract" },
+      }),
+    );
     const toolUse = response.content.find(
       (b): b is Anthropic.Messages.ToolUseBlock => b.type === "tool_use",
     );
@@ -183,3 +235,49 @@ export function stripJsonFence(text: string): string {
   }
   return cleaned;
 }
+
+/**
+ * Escapes raw control characters (line breaks, tabs, …) that appear inside
+ * JSON string literals. Models sometimes emit a literal newline inside a long
+ * string value, which is invalid JSON ("Bad control character in string
+ * literal") even though the content is otherwise fine.
+ */
+function escapeControlCharsInStrings(text: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (!inString) {
+      if (ch === '"') inString = true;
+      out += ch;
+      continue;
+    }
+    if (escaped) {
+      escaped = false;
+      out += ch;
+    } else if (ch === "\\") {
+      escaped = true;
+      out += ch;
+    } else if (ch === '"') {
+      inString = false;
+      out += ch;
+    } else if (ch < " ") {
+      out += ch === "\n" ? "\\n" : ch === "\r" ? "\\r" : ch === "\t" ? "\\t" : `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`;
+    } else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+/** Parses a model's JSON reply: strips code fences, and repairs raw control characters inside strings if needed. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- same contract as JSON.parse, which these callers used before
+export function parseModelJson<T = any>(text: string): T {
+  const cleaned = stripJsonFence(text);
+  try {
+    return JSON.parse(cleaned) as T;
+  } catch {
+    return JSON.parse(escapeControlCharsInStrings(cleaned)) as T;
+  }
+}
+

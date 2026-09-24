@@ -55,3 +55,7 @@ next-env.d.ts
 
 # OS cruft
 Thumbs.db
+
+# macOS / iCloud duplicate copies ("src 2", "CLAUDE 3.md", "tsconfig 2.json", ...)
+* [0-9]
+* [0-9].*

@@ -45,7 +45,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
           />
           {/* Resolves system/light/dark before first paint so there is no flash of the wrong theme.
-              The landing page ("/") is always dark — see LandingPage.tsx. */}
+              The landing page ("/") is always dark — see LandingPage.tsx.
+              Must stay a plain inline <script> so it runs while the HTML is parsed.
+              React 19 logs a dev-only "Encountered a script tag" warning for it;
+              that's expected and harmless. next/script's beforeInteractive runs
+              too late here and causes a flash of the wrong theme. */}
           <script
             dangerouslySetInnerHTML={{
               __html: `(function(){try{var m=localStorage.getItem("scopevanta:theme");var d=location.pathname==="/"||m==="dark"||(m!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d);}catch(e){}})();`,

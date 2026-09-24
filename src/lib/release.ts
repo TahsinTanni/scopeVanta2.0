@@ -19,7 +19,7 @@ export type ReleaseReceipt = {
 // Release existed (no release record to certify).
 export async function loadReleaseReceipt(token: string): Promise<ReleaseReceipt | null> {
   if (!token) return null;
-  const s = await prisma.proposalShare.findUnique({ where: { token } });
+  const s = await prisma.proposalShare.findFirst({ where: { token, workspace: { suspendedAt: null } } });
   if (!s || s.token !== token || s.status === "revoked" || (s.expiresAt && s.status !== "accepted" && s.status !== "changes_requested" && s.expiresAt.getTime() < Date.now())) return null;
   if (!s.releaseId || !s.releaseHash || !s.releasedAt) return null;
   const d = (s.data as ReleaseShareData) || {};
