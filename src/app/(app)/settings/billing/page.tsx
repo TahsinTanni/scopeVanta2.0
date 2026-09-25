@@ -4,13 +4,36 @@ import { useEffect, useState, useRef } from "react";
 import { PageHeader, Button, Badge } from "@/components/ui";
 import { BentoCard, BentoCardGrid, GlobalSpotlight } from "@/components/MagicBento";
 import { trackEvent } from "@/lib/track";
-import { PLANS, ALL_PLAN_FEATURES } from "@/lib/plans";
+import { PLANS, ALL_PLAN_FEATURES, PLAN_CURRENCY, PLAN_PRICES_CENTS, TRIAL_DAYS, type PlanName } from "@/lib/plans";
+import { SquareCardForm } from "@/components/SquareCardForm";
+import { Dialog } from "@/components/Dialog";
 
 type BillingStatus = {
   billing: { status: string; daysLeft: number; limit: number; requiresAction?: boolean; action?: string };
   plan: string; lifecycle: string; chargedThroughDate: string; trialEndsAt: string;
   subscriptionId: string; verifiedAt: string; lastBillingEvent: string;
+  isOwner: boolean;
+  // Owner-only, read live from Square; null when not the owner or unavailable.
+  live: {
+    cancelsOn: string;
+    card: { brand: string; last4: string; expMonth: number; expYear: number } | null;
+    overdueInvoiceUrl: string;
+  } | null;
 };
+
+const fmtDate = (d: string) => new Date(d.length === 10 ? `${d}T00:00:00` : d).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+
+/** POSTs JSON; resolves to the server's error message, or null on success. */
+async function post(url: string, body?: unknown): Promise<string | null> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (res.ok) return null;
+  const data = await res.json().catch(() => ({}));
+  return data.error || "Something went wrong. Please try again.";
+}
 
 // Shared with the landing page; every feature is on every plan, so each card
 // lists its proposal limit followed by the common feature set.
@@ -20,6 +43,11 @@ export default function BillingPage() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Plan whose card form is open (chosen here, or passed from onboarding as ?plan=).
+  const [checkoutPlan, setCheckoutPlan] = useState<PlanName | null>(null);
+  const [updatingCard, setUpdatingCard] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [notice, setNotice] = useState("");
   const gridRef = useRef<HTMLDivElement>(null);
 
   async function load() {
@@ -29,24 +57,48 @@ export default function BillingPage() {
     return data as BillingStatus | null;
   }
   useEffect(() => {
-    load();
+    load().then((data) => {
+      const requested = new URLSearchParams(window.location.search).get("plan");
+      const isActive = data?.billing.status === "verified_active" || data?.billing.status === "complimentary";
+      if (!isActive && PLANS.some((p) => p.name === requested)) setCheckoutPlan(requested as PlanName);
+    });
   }, []);
 
-  async function switchPlan(plan: string) {
+  function choosePlan(plan: PlanName) {
+    setError("");
+    if (!status?.isOwner) {
+      setError("Only the workspace owner can manage billing.");
+      return;
+    }
+    if (active) {
+      setError("Your subscription is active. Plan changes aren't available in the app yet — contact support to switch plans.");
+      return;
+    }
+    trackEvent("checkout_started", { plan });
+    setCheckoutPlan(plan);
+  }
+
+  async function subscribed() {
+    setCheckoutPlan(null);
+    const data = await load();
+    if (data?.billing.status === "verified_active") trackEvent("billing_verified");
+  }
+
+  async function cardUpdated() {
+    setUpdatingCard(false);
+    setNotice("Card updated. Future charges will use the new card.");
+    await load();
+  }
+
+  async function cancel() {
     setBusy(true);
     setError("");
     try {
-      const res = await fetch("/api/billing/checkout-started", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan }) });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setError(body.error || "Could not start checkout.");
-        return;
-      }
-      if (body.checkoutUrl) {
-        trackEvent("checkout_started", { plan });
-        window.open(body.checkoutUrl, "_blank", "noopener,noreferrer");
-      }
-      load();
+      const failure = await post("/api/billing/cancel");
+      setConfirmCancel(false);
+      if (failure) setError(failure);
+      else setNotice("Subscription canceled. You keep access until the end of the current billing period.");
+      await load();
     } finally {
       setBusy(false);
     }
@@ -124,10 +176,42 @@ export default function BillingPage() {
             <p className="mt-2 text-xs text-ink-muted font-mono tabular-nums">Last billing event: {status.lastBillingEvent}</p>
           )}
 
-          {status.billing.action && (
-            <div className="mt-3 rounded-[4px] border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning font-mono">
-              Action needed: {status.billing.action.replaceAll("_", " ")}
+          {status.billing.status === "payment_failed" ? (
+            <div className="mt-3 rounded-[4px] border border-danger/30 bg-danger/10 px-3 py-3 text-xs text-danger">
+              <p className="font-semibold">Your last payment didn&apos;t go through, so AI features are paused.</p>
+              {status.isOwner ? (
+                <>
+                  <p className="mt-1">
+                    Pay the overdue invoice on Square&apos;s secure page — access comes back automatically once it&apos;s paid.
+                    Then update your card so future charges succeed.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {status.live?.overdueInvoiceUrl ? (
+                      <Button onClick={() => window.open(status.live!.overdueInvoiceUrl, "_blank", "noopener,noreferrer")}>
+                        Pay overdue invoice
+                      </Button>
+                    ) : (
+                      <span className="self-center">Square also emailed the invoice with a payment link.</span>
+                    )}
+                    <Button variant="secondary" onClick={() => setUpdatingCard(true)}>
+                      Update card
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <p className="mt-1">Ask the workspace owner to update the payment method.</p>
+              )}
             </div>
+          ) : (
+            status.billing.action && (
+              <div className="mt-3 rounded-[4px] border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning font-mono">
+                Action needed: {status.billing.action.replaceAll("_", " ")}
+              </div>
+            )
+          )}
+
+          {notice && (
+            <div className="mt-3 rounded-[4px] border border-success/30 bg-success/10 px-3 py-2 text-xs text-success font-mono">{notice}</div>
           )}
 
           {error && (
@@ -138,10 +222,70 @@ export default function BillingPage() {
 
           {active && (
             <p className="mt-5 text-xs text-ink-muted border-t border-border-subtle pt-4">
-              Your subscription is active and verified by Square. Team seats are managed dynamically based on your workspace member count.
+              Your subscription is active and verified by Square.
             </p>
           )}
+
+          {status.isOwner && status.live && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle pt-4 text-xs">
+              <div className="space-y-1 font-mono text-ink-muted tabular-nums">
+                {status.live.card && (
+                  <p>
+                    Card on file: {status.live.card.brand} •••• {status.live.card.last4} · exp {String(status.live.card.expMonth).padStart(2, "0")}/
+                    {String(status.live.card.expYear).slice(-2)}
+                  </p>
+                )}
+                {status.live.cancelsOn && (
+                  <p className="text-warning">Canceled — access ends {fmtDate(status.live.cancelsOn)}.</p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {status.billing.status !== "payment_failed" && (
+                  <Button variant="secondary" onClick={() => setUpdatingCard(true)} disabled={busy}>
+                    Update card
+                  </Button>
+                )}
+                {!status.live.cancelsOn && status.billing.status !== "square_canceled" && (
+                  <Button variant="ghost" onClick={() => setConfirmCancel(true)} disabled={busy}>
+                    Cancel subscription
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </BentoCard>
+
+        {updatingCard && (
+          <BentoCard className="sidebar-expandable max-w-5xl p-6" glowColor="78, 135, 112">
+            <SquareCardForm
+              intro="Enter the new card. It replaces the current one for all future charges."
+              submitLabel="Save new card"
+              busyLabel="Saving card…"
+              onToken={(token) => post("/api/billing/update-card", { sourceId: token })}
+              onDone={cardUpdated}
+              onCancel={() => setUpdatingCard(false)}
+            />
+          </BentoCard>
+        )}
+
+        {checkoutPlan && (
+          <BentoCard className="sidebar-expandable max-w-5xl p-6" glowColor="78, 135, 112">
+            <SquareCardForm
+              key={checkoutPlan}
+              intro={
+                <>
+                  Subscribe to <span className="font-semibold">{checkoutPlan}</span>: the first {TRIAL_DAYS} days are free, then {PLAN_CURRENCY} $
+                  {PLAN_PRICES_CENTS[checkoutPlan] / 100}/month. Nothing is charged today.
+                </>
+              }
+              submitLabel={`Start ${TRIAL_DAYS}-day free trial`}
+              busyLabel="Starting subscription…"
+              onToken={(token) => post("/api/billing/subscribe", { plan: checkoutPlan, sourceId: token })}
+              onDone={subscribed}
+              onCancel={() => setCheckoutPlan(null)}
+            />
+          </BentoCard>
+        )}
 
         {/* Plan tiers selection */}
         <div>
@@ -156,7 +300,9 @@ export default function BillingPage() {
 
           <div className="sidebar-expandable grid grid-cols-1 gap-4 max-w-5xl md:grid-cols-3">
             {PLAN_CARDS.map((tier) => {
-              const isCurrent = status.plan === tier.name;
+              // Only a paid/verified plan is "current". A plan saved by an
+              // unfinished checkout must stay selectable so checkout can resume.
+              const isCurrent = active && status.plan === tier.name;
               return (
                 <BentoCard
                   key={tier.name}
@@ -198,7 +344,7 @@ export default function BillingPage() {
                   <Button
                     variant={tier.popular ? "primary" : "secondary"}
                     disabled={busy || isCurrent}
-                    onClick={() => switchPlan(tier.name)}
+                    onClick={() => choosePlan(tier.name)}
                     className="mt-6 text-xs py-2 w-full"
                   >
                     {isCurrent ? "Current Plan" : `Choose ${tier.name}`}
@@ -209,6 +355,24 @@ export default function BillingPage() {
           </div>
         </div>
       </BentoCardGrid>
+
+      <Dialog open={confirmCancel} onClose={() => setConfirmCancel(false)} title="Cancel subscription">
+        <div className="space-y-4 p-6">
+          <h3 className="font-display text-base font-semibold text-ink-primary">Cancel your subscription?</h3>
+          <p className="text-sm text-ink-secondary">
+            Square stops billing at the end of the current billing period, and AI features stay available until then. You can subscribe
+            again at any time.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setConfirmCancel(false)} disabled={busy}>
+              Keep subscription
+            </Button>
+            <Button variant="danger" onClick={cancel} disabled={busy} loading={busy}>
+              Cancel subscription
+            </Button>
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }

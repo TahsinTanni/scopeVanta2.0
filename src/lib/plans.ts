@@ -11,7 +11,14 @@
 export type PlanName = "Freelancer" | "Pro" | "Agency";
 
 export const PLAN_CURRENCY = "CAD";
-export const TRIAL_DAYS = 30;
+// The ONE trial length. Square's free first phase (lib/square.ts
+// billingConfig) is TRIAL_DAYS daily periods, and every local trialEndsAt
+// comes from trialEndFrom(), so the two stay in step.
+export const TRIAL_DAYS = 7;
+
+export function trialEndFrom(start: Date): Date {
+  return new Date(start.getTime() + TRIAL_DAYS * 86_400_000);
+}
 
 export const PLAN_PRICES_CENTS: Record<PlanName, number> = {
   Freelancer: 1900,

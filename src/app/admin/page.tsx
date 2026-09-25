@@ -40,7 +40,7 @@ export default async function AdminOverviewPage() {
   ]);
 
   // Billing picture. "In trial" = Square subscription active but still in
-  // its free first month; "paying" = active and past the trial.
+  // its free trial (TRIAL_DAYS); "paying" = active and past the trial.
   const active = subs.filter((s) => !s.compPlan && s.status === "verified_active");
   const inTrial = active.filter((s) => s.trialEndsAt && s.trialEndsAt > now);
   const paying = active.filter((s) => !s.trialEndsAt || s.trialEndsAt <= now);

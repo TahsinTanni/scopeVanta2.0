@@ -5,12 +5,31 @@ import { prisma } from "@/lib/prisma";
 // CLAUDE.md ("Billing (Square)") instead of legacy's per-user-email model.
 // See Step 5 report for the full rationale on what changed and why.
 
-const SQUARE_VERSION = "2026-08-19";
-const SQUARE_API_BASE = "https://connect.squareup.com";
+export const SQUARE_VERSION = "2026-08-19";
+// SQUARE_ENVIRONMENT="sandbox" points every Square call at the sandbox host;
+// anything else, or unset, means production.
+export const SQUARE_ENVIRONMENT: "sandbox" | "production" =
+  process.env.SQUARE_ENVIRONMENT?.trim().toLowerCase() === "sandbox" ? "sandbox" : "production";
+export const SQUARE_API_BASE =
+  SQUARE_ENVIRONMENT === "sandbox" ? "https://connect.squareupsandbox.com" : "https://connect.squareup.com";
 
 // Prices and limits live in lib/plans.ts so marketing copy and checkout share them.
 export { PLAN_PRICES_CENTS, PLAN_LIMITS } from "@/lib/plans";
-import { PLAN_PRICES_CENTS, PLAN_CURRENCY } from "@/lib/plans";
+import { PLAN_PRICES_CENTS, PLAN_CURRENCY, TRIAL_DAYS } from "@/lib/plans";
+
+/**
+ * A non-2xx Square API response. `status` lets callers tell 404 from an
+ * outage; `codes` are Square's error codes (e.g. CARD_DECLINED) for callers
+ * that need to explain a refusal.
+ */
+export class SquareApiError extends Error {
+  constructor(
+    public status: number,
+    public codes: string[] = [],
+  ) {
+    super(`Square request failed: ${status}${codes.length ? ` (${codes.join(", ")})` : ""}`);
+  }
+}
 
 export async function square(path: string, init: RequestInit = {}): Promise<Record<string, unknown>> {
   const token = process.env.SQUARE_ACCESS_TOKEN;
@@ -25,7 +44,10 @@ export async function square(path: string, init: RequestInit = {}): Promise<Reco
     },
   });
   const data = (await response.json()) as Record<string, unknown>;
-  if (!response.ok) throw new Error(`Square request failed: ${response.status}`);
+  if (!response.ok) {
+    const errors = (data.errors as Array<{ code?: string }> | undefined) || [];
+    throw new SquareApiError(response.status, errors.map((e) => String(e.code || "")).filter(Boolean));
+  }
   return data;
 }
 
@@ -69,7 +91,7 @@ export async function billingConfig() {
             name: `ScopeVanta ${name}`,
             subscription_plan_id: planId,
             phases: [
-              { cadence: "MONTHLY", ordinal: 0, periods: 1, pricing: { type: "STATIC", price: { amount: 0, currency: PLAN_CURRENCY } } },
+              { cadence: "DAILY", ordinal: 0, periods: TRIAL_DAYS, pricing: { type: "STATIC", price: { amount: 0, currency: PLAN_CURRENCY } } },
               { cadence: "MONTHLY", ordinal: 1, pricing: { type: "STATIC", price: { amount: PLAN_PRICES_CENTS[name], currency: PLAN_CURRENCY } } },
             ],
           },
@@ -118,31 +140,127 @@ export async function ensureSquareCustomer(workspaceId: string, buyerEmail: stri
   return customerId;
 }
 
-export async function createCheckout(workspaceId: string, buyerEmail: string, plan: "Freelancer" | "Pro" | "Agency") {
+export type SquareSubscription = {
+  id: string;
+  status: string;
+  start_date?: string;
+  charged_through_date?: string;
+  canceled_date?: string;
+  card_id?: string;
+  customer_id?: string;
+};
+
+/** Saves a Web Payments SDK card token as a card on file for `customerId`; returns the card ID. */
+export async function saveCardOnFile(customerId: string, cardToken: string): Promise<string> {
+  const card = await square("/v2/cards", {
+    method: "POST",
+    body: JSON.stringify({
+      idempotency_key: crypto.randomUUID(),
+      source_id: cardToken,
+      card: { customer_id: customerId },
+    }),
+  });
+  const cardId = String((card.card as { id?: string })?.id || "");
+  if (!cardId) throw new Error("Square card creation failed");
+  return cardId;
+}
+
+/** Points the subscription's future charges at `cardId`. */
+export async function setSubscriptionCard(subscriptionId: string, cardId: string): Promise<void> {
+  await square(`/v2/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+    method: "PUT",
+    body: JSON.stringify({ subscription: { card_id: cardId } }),
+  });
+}
+
+/**
+ * Schedules cancellation. Square ends the subscription at the end of the
+ * current billing cycle (canceled_date), so access continues until then.
+ */
+export async function cancelSubscription(subscriptionId: string): Promise<SquareSubscription> {
+  const result = await square(`/v2/subscriptions/${encodeURIComponent(subscriptionId)}/cancel`, { method: "POST" });
+  return result.subscription as SquareSubscription;
+}
+
+export type LiveSubscriptionDetails = {
+  cancelsOn: string;
+  card: { brand: string; last4: string; expMonth: number; expYear: number } | null;
+  overdueInvoiceUrl: string;
+};
+
+/**
+ * Live details for the owner's billing page, read from Square each time (none
+ * of it is stored locally): scheduled cancellation, the card on file, and —
+ * after a failed charge — the hosted page for paying the unpaid invoice.
+ * Square's APIs can't pay an invoice, so that link is how a customer settles it.
+ */
+export async function liveSubscriptionDetails(
+  subscriptionId: string,
+  opts: { withOverdueInvoice: boolean },
+): Promise<LiveSubscriptionDetails> {
+  const found = await square(`/v2/subscriptions/${encodeURIComponent(subscriptionId)}`);
+  const subscription = found.subscription as SquareSubscription;
+  let card: LiveSubscriptionDetails["card"] = null;
+  if (subscription.card_id) {
+    const c = (await square(`/v2/cards/${encodeURIComponent(subscription.card_id)}`)).card as
+      | { card_brand?: string; last_4?: string; exp_month?: number; exp_year?: number }
+      | undefined;
+    if (c) card = { brand: c.card_brand || "Card", last4: c.last_4 || "", expMonth: c.exp_month || 0, expYear: c.exp_year || 0 };
+  }
+  let overdueInvoiceUrl = "";
+  if (opts.withOverdueInvoice && subscription.customer_id) {
+    const cfg = await billingConfig();
+    const search = await square("/v2/invoices/search", {
+      method: "POST",
+      body: JSON.stringify({
+        limit: 20,
+        query: {
+          filter: { location_ids: [cfg.locationId], customer_ids: [subscription.customer_id] },
+          sort: { field: "INVOICE_SORT_DATE", order: "DESC" },
+        },
+      }),
+    });
+    const invoices = (search.invoices as Array<{ subscription_id?: string; status?: string; public_url?: string }> | undefined) || [];
+    const unpaid = invoices.find(
+      (inv) => inv.subscription_id === subscriptionId && ["UNPAID", "PARTIALLY_PAID"].includes(String(inv.status)),
+    );
+    overdueInvoiceUrl = unpaid?.public_url || "";
+  }
+  return { cancelsOn: subscription.canceled_date || "", card, overdueInvoiceUrl };
+}
+
+/**
+ * Subscribes the workspace's own Square customer (never a customer Square
+ * matched by phone/email, which is what hosted payment links do) to `plan`:
+ * saves the card from a Web Payments SDK token on that customer, then creates
+ * the subscription charging it. The plan variation's first phase is the
+ * TRIAL_DAYS $0 trial, so nothing is charged today.
+ */
+export async function subscribeWorkspace(
+  workspaceId: string,
+  buyerEmail: string,
+  plan: "Freelancer" | "Pro" | "Agency",
+  cardToken: string,
+): Promise<SquareSubscription> {
   const cfg = await billingConfig();
   const variationId = cfg.variations[plan];
   if (!variationId) throw new Error("Unknown plan");
   const customerId = await ensureSquareCustomer(workspaceId, buyerEmail);
-  const result = await square("/v2/online-checkout/payment-links", {
+  const cardId = await saveCardOnFile(customerId, cardToken);
+
+  const created = await square("/v2/subscriptions", {
     method: "POST",
     body: JSON.stringify({
       idempotency_key: crypto.randomUUID(),
-      quick_pay: {
-        name: `ScopeVanta ${plan} - 30 day trial`,
-        price_money: { amount: 0, currency: PLAN_CURRENCY },
-        location_id: cfg.locationId,
-      },
-      checkout_options: {
-        subscription_plan_id: variationId,
-        redirect_url: process.env.NEXT_PUBLIC_APP_URL || "",
-      },
-      pre_populated_data: { buyer_email: buyerEmail },
-      payment_note: `ScopeVanta workspace ${workspaceId} · customer ${customerId}`,
+      location_id: cfg.locationId,
+      plan_variation_id: variationId,
+      customer_id: customerId,
+      card_id: cardId,
     }),
   });
-  const url = String((result.payment_link as { url?: string })?.url || "");
-  if (!url) throw new Error("Square checkout link creation failed");
-  return { url, variationId };
+  const subscription = created.subscription as SquareSubscription | undefined;
+  if (!subscription?.id) throw new Error("Square subscription creation failed");
+  return subscription;
 }
 
 /** Verifies entitlement using the workspace's stored Square IDs only — never re-searches by email. */

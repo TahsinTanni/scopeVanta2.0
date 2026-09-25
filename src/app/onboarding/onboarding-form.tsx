@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, Textarea, Label, Card } from "@/components/ui";
+import { TRIAL_DAYS } from "@/lib/plans";
 
 const PLANS = [
   { name: "Freelancer", price: "CAD $19/mo", usage: "10 proposals / month" },
@@ -27,7 +28,7 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
   const [error, setError] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
   const [uploadingLogo, setUploadingLogo] = useState(false);
-  const [referenceUploadStatus, setReferenceUploadStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
+  const [referenceUploadStatus, setReferenceUploadStatus] = useState<"idle" | "uploading" | "done" | "deferred" | "error">("idle");
 
   async function uploadLogo(file: File) {
     setUploadingLogo(true);
@@ -66,7 +67,8 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
         setReferenceUploadStatus("error");
         return;
       }
-      setReferenceUploadStatus("done");
+      // Saved, but AI processing waits for an active subscription.
+      setReferenceUploadStatus(body.processingDeferred ? "deferred" : "done");
     } catch {
       setReferenceUploadStatus("error");
     }
@@ -90,16 +92,9 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
         router.push("/dashboard");
         return;
       }
-      const checkout = await fetch("/api/billing/checkout-started", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan }),
-      });
-      const checkoutBody = await checkout.json().catch(() => ({}));
-      if (checkout.ok && checkoutBody.checkoutUrl) {
-        window.open(checkoutBody.checkoutUrl, "_blank", "noopener,noreferrer");
-      }
-      router.push("/dashboard");
+      // The owner adds a card in Square's form on Plan & billing, with the
+      // chosen plan preselected.
+      router.push(`/settings/billing?plan=${encodeURIComponent(plan)}`);
     } finally {
       setBusy(false);
     }
@@ -175,6 +170,9 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
               />
             </label>
             {referenceUploadStatus === "done" && <span className="text-xs text-success">Added to knowledge base ✓</span>}
+            {referenceUploadStatus === "deferred" && (
+              <span className="text-xs text-foreground-subtle">Saved ✓ — reprocess it from Knowledge after checkout</span>
+            )}
             {referenceUploadStatus === "error" && <span className="text-xs text-danger">Upload failed</span>}
           </div>
         </div>
@@ -192,7 +190,7 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
                   <div className="text-sm font-semibold text-foreground">{p.name}</div>
                   <div className="mt-1 text-lg font-semibold text-foreground">{p.price}</div>
                   <div className="mt-1 text-xs text-foreground-subtle">{p.usage}</div>
-                  <div className="mt-2 text-xs text-foreground-subtle">30-day introductory trial</div>
+                  <div className="mt-2 text-xs text-foreground-subtle">{TRIAL_DAYS}-day introductory trial</div>
                 </button>
               ))}
             </div>
@@ -202,11 +200,11 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
         {error && <p className="mt-4 text-sm text-danger">{error}</p>}
 
         <Button className="mt-6 w-full" disabled={busy} onClick={submit}>
-          {busy ? "Saving…" : isOwner ? "Continue to Square & activate" : "Save workspace profile"}
+          {busy ? "Saving…" : isOwner ? "Continue to payment" : "Save workspace profile"}
         </Button>
         {isOwner && (
           <p className="mt-3 text-xs text-foreground-subtle">
-            Your workspace is saved before checkout. Square securely collects the payment method — ScopeVanta never receives the full card number. The introductory month is $0, then the selected monthly price begins unless cancelled.
+            Your workspace is saved first. Next, you add a card in Square&apos;s secure form — ScopeVanta never receives the full card number. The first {TRIAL_DAYS} days are $0, then the selected monthly price begins unless cancelled.
           </p>
         )}
       </Card>

@@ -4,7 +4,7 @@ import { HttpError } from "@/lib/http";
 import type { WorkspaceRole } from "@/generated/prisma/enums";
 import { Prisma } from "@/generated/prisma/client";
 
-function isUniqueConstraintError(e: unknown): boolean {
+export function isUniqueConstraintError(e: unknown): boolean {
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
 }
 

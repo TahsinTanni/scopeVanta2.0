@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
+import { requireEntitlement } from "@/lib/billing";
 import { aiGenerate, parseModelJson } from "@/lib/ai";
 import { projectData, formatConfirmedFacts } from "@/lib/project-data";
 
@@ -11,6 +12,7 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
   const p = await prisma.project.findFirst({ where: { id, workspaceId: ctx.workspaceId } });
   if (!p) return error("Opportunity not found.", 404);
   const d = projectData(p.data);
+  await requireEntitlement(ctx.workspaceId, "running Commercial Autopilot");
 
   const historyRows = await prisma.project.findMany({ where: { workspaceId: ctx.workspaceId, id: { not: id } }, take: 80 });
   const comparable = historyRows

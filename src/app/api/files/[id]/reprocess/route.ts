@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
+import { requireEntitlement } from "@/lib/billing";
 import { storageRead } from "@/lib/storage";
 import { aiGenerate, aiOcr } from "@/lib/ai";
 import { structureKnowledge, knowledgeCategories, type KnowledgeRecordContent } from "@/lib/knowledge";
@@ -15,6 +16,7 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
 
   const file = await prisma.knowledgeFile.findFirst({ where: { id: fileId, workspaceId: ctx.workspaceId } });
   if (!file) return error("Knowledge file not found.", 404);
+  await requireEntitlement(ctx.workspaceId, "reprocessing this file");
 
   const stored = await storageRead(file.storageKey);
   if (!stored?.content) return error("The original file is no longer available for reprocessing.", 410);

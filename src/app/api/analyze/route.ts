@@ -3,8 +3,8 @@ import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors, HttpError } from "@/lib/http";
 import { aiGenerate, aiScrape, parseModelJson } from "@/lib/ai";
 import { rankKnowledge, type KnowledgeRecordContent } from "@/lib/knowledge";
-import { PLAN_LIMITS, verifyEntitlement, billingDateAdvanced, hasDevEntitlementBypass } from "@/lib/square";
-import { COMP_PLAN_LIMIT } from "@/lib/billing";
+import { PLAN_LIMITS } from "@/lib/square";
+import { COMP_PLAN_LIMIT, requireEntitlement } from "@/lib/billing";
 
 // POST /api/analyze — legacy/backend/index.ts:2130-2493. The AI system/user
 // prompt text is preserved verbatim; only the plumbing (workspace-scoped
@@ -36,57 +36,7 @@ export const POST = withErrors(async (req: Request) => {
   const profile = await prisma.companyProfile.findUnique({ where: { workspaceId: ctx.workspaceId } });
   if (!profile?.onboarded) return error("Complete account setup first.", 403);
 
-  const devBypass = hasDevEntitlementBypass();
-  let sub = await prisma.billingSubscription.findUnique({ where: { workspaceId: ctx.workspaceId } });
-  // Staff-granted free plans (admin panel) skip Square entitlement entirely.
-  const comp = sub?.compPlan === true;
-  if (!devBypass && !comp && !sub?.checkoutStartedAt) return error("Start your Square subscription checkout to activate the trial.", 402);
-
-  try {
-    const lastVerified = sub?.verifiedAt ? sub.verifiedAt.getTime() : 0;
-    const verificationStale = Date.now() - lastVerified > 15 * 60 * 1000;
-    if (!devBypass && !comp && (sub?.status !== "verified_active" || verificationStale)) {
-      const verified = await verifyEntitlement(ctx.workspaceId);
-      const chargedThroughDateStr = String(verified?.charged_through_date || sub?.chargedThroughDate?.toISOString() || "");
-      const paymentRecovery = sub?.status === "payment_failed" && billingDateAdvanced(sub?.chargedThroughDate, chargedThroughDateStr);
-      if (!verified || verified.status !== "ACTIVE" || (sub?.status === "payment_failed" && !paymentRecovery)) {
-        if (sub?.status === "verified_active") {
-          await prisma.billingSubscription.update({
-            where: { workspaceId: ctx.workspaceId },
-            data: { status: verified ? `square_${verified.status.toLowerCase()}` : "square_not_found", verifiedAt: new Date() },
-          });
-        }
-        return error("An active Square subscription is required before generating proposals. Open Plan & billing to verify your subscription.", 402);
-      }
-      const trialStart = sub?.trialStartedAt || (verified.start_date ? new Date(`${verified.start_date}T00:00:00.000Z`) : new Date());
-      sub = await prisma.billingSubscription.upsert({
-        where: { workspaceId: ctx.workspaceId },
-        create: {
-          workspaceId: ctx.workspaceId,
-          plan: verified.plan as "Freelancer" | "Pro" | "Agency",
-          status: "verified_active",
-          trialStartedAt: trialStart,
-          trialEndsAt: sub?.trialEndsAt || new Date(trialStart.getTime() + 30 * 86_400_000),
-          squareSubscriptionId: verified.id,
-          verifiedAt: new Date(),
-          chargedThroughDate: chargedThroughDateStr ? new Date(chargedThroughDateStr) : null,
-          billingAction: "",
-        },
-        update: {
-          plan: verified.plan as "Freelancer" | "Pro" | "Agency",
-          status: "verified_active",
-          trialStartedAt: trialStart,
-          trialEndsAt: sub?.trialEndsAt || new Date(trialStart.getTime() + 30 * 86_400_000),
-          squareSubscriptionId: verified.id,
-          verifiedAt: new Date(),
-          chargedThroughDate: chargedThroughDateStr ? new Date(chargedThroughDateStr) : null,
-          billingAction: "",
-        },
-      });
-    }
-  } catch {
-    return error("Your Square subscription could not be verified. Use Plan & billing to sync it.", 402);
-  }
+  const { sub, devBypass, comp } = await requireEntitlement(ctx.workspaceId, "generating proposals");
 
   const cutoff = new Date();
   cutoff.setDate(1);

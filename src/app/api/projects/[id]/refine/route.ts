@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
+import { requireEntitlement } from "@/lib/billing";
 import { aiGenerate, parseModelJson } from "@/lib/ai";
 import { projectData } from "@/lib/project-data";
 
@@ -25,6 +26,7 @@ export const POST = withErrors(async (req: Request, { params }: { params: Promis
 
   const profile = await prisma.companyProfile.findUnique({ where: { workspaceId: ctx.workspaceId } });
   if (!profile) return error("Complete profile first.", 400);
+  await requireEntitlement(ctx.workspaceId, "refining this proposal");
   const requested = b.proposalOptions || (project.proposalOptions as ProposalOptions) || {};
   const resolved = questions.map((q, i) => `${i + 1}. ${q}\nAnswer: ${answers[i] || "Not answered — keep To be confirmed"}`).join("\n\n");
 

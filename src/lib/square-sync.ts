@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import type { BillingSubscription } from "@/generated/prisma/client";
 import { verifyEntitlement, billingDateAdvanced } from "@/lib/square";
+import { trialEndFrom } from "@/lib/plans";
 
 /**
  * Re-reads a workspace's subscription from Square (by its stored Square IDs,
@@ -31,7 +32,7 @@ export async function syncSquareSubscription(
       workspaceId,
       plan: verified.plan as "Freelancer" | "Pro" | "Agency",
       trialStartedAt: trialStart,
-      trialEndsAt: sub?.trialEndsAt || (trialStart ? new Date(trialStart.getTime() + 30 * 86_400_000) : null),
+      trialEndsAt: sub?.trialEndsAt || (trialStart ? trialEndFrom(trialStart) : null),
       status: paymentFailureLocked ? "payment_failed" : active ? "verified_active" : `square_${verified.status.toLowerCase()}`,
       squareSubscriptionId: verified.id,
       verifiedAt: new Date(),
@@ -49,7 +50,7 @@ export async function syncSquareSubscription(
     update: {
       plan: verified.plan as "Freelancer" | "Pro" | "Agency",
       trialStartedAt: trialStart,
-      trialEndsAt: sub?.trialEndsAt || (trialStart ? new Date(trialStart.getTime() + 30 * 86_400_000) : null),
+      trialEndsAt: sub?.trialEndsAt || (trialStart ? trialEndFrom(trialStart) : null),
       status: paymentFailureLocked ? "payment_failed" : active ? "verified_active" : `square_${verified.status.toLowerCase()}`,
       squareSubscriptionId: verified.id,
       verifiedAt: new Date(),

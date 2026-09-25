@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
+import { requireEntitlement } from "@/lib/billing";
 import { aiGenerate, parseModelJson } from "@/lib/ai";
 import { projectData, formatConfirmedFacts } from "@/lib/project-data";
 
@@ -19,6 +20,7 @@ export const POST = withErrors(async (_req: Request, { params }: { params: Promi
   const d = projectData(project.data);
   const profile = await prisma.companyProfile.findUnique({ where: { workspaceId: ctx.workspaceId } });
   if (!profile) return error("Complete profile first.", 400);
+  await requireEntitlement(ctx.workspaceId, "building a win plan");
 
   let clientContext = "";
   if (project.clientId) {

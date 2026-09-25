@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth, requireRole } from "@/lib/auth";
-import { json, error, withErrors } from "@/lib/http";
+import { json, error, withErrors, HttpError } from "@/lib/http";
+import { requireEntitlement } from "@/lib/billing";
 import { assertFeatureEnabled } from "@/lib/flags";
 import { storageWrite, storageDelete } from "@/lib/storage";
 import { aiGenerate, aiOcr } from "@/lib/ai";
@@ -22,6 +23,19 @@ export const POST = withErrors(async (req: Request) => {
   if (b.kind === "client_logo" && !b.clientId) return error("Choose a saved client before uploading a client logo.", 400);
   if (b.content.length > 7_200_000) return error("File is too large.", 400);
   if (b.kind === "logo") requireRole(ctx, ["OWNER", "ADMIN"]);
+  // Logos are stored only; every other kind goes through paid AI extraction.
+  // Without entitlement (e.g. onboarding, before checkout) the document is
+  // still stored, as STORED with no AI run; /api/files/:id/reprocess — gated
+  // by the same check — processes it once the subscription is active.
+  let processingDeferred = false;
+  if (b.kind !== "logo" && b.kind !== "client_logo") {
+    try {
+      await requireEntitlement(ctx.workspaceId, "processing uploaded documents");
+    } catch (e) {
+      if (!(e instanceof HttpError && e.status === 402)) throw e;
+      processingDeferred = true;
+    }
+  }
 
   const safe = b.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100);
   const path = `workspaces/${ctx.workspaceId}/${b.kind}/${Date.now()}-${safe}`;
@@ -54,7 +68,9 @@ export const POST = withErrors(async (req: Request) => {
     await prisma.client.update({ where: { id: client.id }, data: { logoUrl: url } });
     if (previousUrl && previousUrl !== url) await storageDelete(previousUrl);
   } else {
-    if (/\.(txt|md)$/i.test(safe)) {
+    if (processingDeferred) {
+      extractionError = "Stored, not processed yet: an active subscription is required. Use Reprocess once your subscription is active.";
+    } else if (/\.(txt|md)$/i.test(safe)) {
       try {
         const raw = Buffer.from(b.content, "base64").toString("utf8");
         truncated = raw.length > 30000;
@@ -201,6 +217,7 @@ export const POST = withErrors(async (req: Request) => {
     name: safe,
     id: fileId,
     status,
+    processingDeferred,
     extractedChars: extractedText.length,
     error: extractionError,
     truncated,
