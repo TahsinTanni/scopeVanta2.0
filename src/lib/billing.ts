@@ -104,6 +104,13 @@ export async function requireEntitlement(workspaceId: string, context: string): 
   if (devBypass || comp) return { sub, devBypass, comp };
   if (!sub?.checkoutStartedAt) throw new HttpError("Start your Square subscription checkout to activate the trial.", 402);
 
+  // Cancelled during the free trial: Square has ended (or is about to end) the
+  // subscription, so nothing will be charged, but the owner keeps access until
+  // the trial they signed up for ends. Returning subscribers get no trial
+  // (their trialEndsAt is day one), so this can't be repeated.
+  const inTrial = Boolean(sub.trialEndsAt && sub.trialEndsAt.getTime() > Date.now());
+  if (inTrial && sub.status === "square_canceled") return { sub, devBypass, comp };
+
   try {
     const lastVerified = sub?.verifiedAt ? sub.verifiedAt.getTime() : 0;
     const verificationStale = Date.now() - lastVerified > 15 * 60 * 1000;
@@ -114,6 +121,10 @@ export async function requireEntitlement(workspaceId: string, context: string): 
       const chargedThroughDateStr = String(verified?.charged_through_date || sub?.chargedThroughDate?.toISOString() || "");
       const paymentRecovery = sub?.status === "payment_failed" && billingDateAdvanced(sub?.chargedThroughDate, chargedThroughDateStr);
       if (!verified || verified.status !== "ACTIVE" || (sub?.status === "payment_failed" && !paymentRecovery)) {
+        if (inTrial && verified?.status === "CANCELED") {
+          sub = await prisma.billingSubscription.update({ where: { workspaceId }, data: { status: "square_canceled", verifiedAt: new Date() } });
+          return { sub, devBypass, comp };
+        }
         if (sub?.status === "verified_active") {
           await prisma.billingSubscription.update({
             where: { workspaceId },

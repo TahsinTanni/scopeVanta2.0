@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { json, error } from "@/lib/http";
-import { square, billingConfig, billingDateAdvanced, workspaceFromSubscription, SquareApiError } from "@/lib/square";
+import { square, billingConfig, billingDateAdvanced, workspaceFromSubscription, SquareApiError, planForVariation } from "@/lib/square";
 import { isUniqueConstraintError } from "@/lib/auth";
 import { trialEndFrom } from "@/lib/plans";
 
@@ -110,11 +110,7 @@ export async function POST(req: Request) {
           const active = status === "ACTIVE";
           const cfg = await billingConfig();
           const plan =
-            (Object.entries(cfg.variations).find(([, id]) => id === String(subscription.plan_variation_id || ""))?.[0] as
-              | "Freelancer"
-              | "Pro"
-              | "Agency"
-              | undefined) || current.plan;
+            planForVariation(cfg, subscription.plan_variation_id) || current.plan;
           const paymentFailure = chargeFailed;
           const chargedThroughDateStr = String(subscription.charged_through_date || current.chargedThroughDate?.toISOString() || "");
           const chargedThroughDate = chargedThroughDateStr ? new Date(chargedThroughDateStr) : null;

@@ -13,6 +13,7 @@ type BillingStatus = {
   plan: string; lifecycle: string; chargedThroughDate: string; trialEndsAt: string;
   subscriptionId: string; verifiedAt: string; lastBillingEvent: string;
   isOwner: boolean;
+  trialEligible: boolean;
   // Owner-only, read live from Square; null when not the owner or unavailable.
   live: {
     cancelsOn: string;
@@ -97,7 +98,7 @@ export default function BillingPage() {
       const failure = await post("/api/billing/cancel");
       setConfirmCancel(false);
       if (failure) setError(failure);
-      else setNotice("Subscription canceled. You keep access until the end of the current billing period.");
+      else setNotice("Subscription canceled. You keep access until the date shown below.");
       await load();
     } finally {
       setBusy(false);
@@ -273,12 +274,19 @@ export default function BillingPage() {
             <SquareCardForm
               key={checkoutPlan}
               intro={
-                <>
-                  Subscribe to <span className="font-semibold">{checkoutPlan}</span>: the first {TRIAL_DAYS} days are free, then {PLAN_CURRENCY} $
-                  {PLAN_PRICES_CENTS[checkoutPlan] / 100}/month. Nothing is charged today.
-                </>
+                status.trialEligible ? (
+                  <>
+                    Subscribe to <span className="font-semibold">{checkoutPlan}</span>: the first {TRIAL_DAYS} days are free, then {PLAN_CURRENCY} $
+                    {PLAN_PRICES_CENTS[checkoutPlan] / 100}/month. Nothing is charged today.
+                  </>
+                ) : (
+                  <>
+                    Subscribe to <span className="font-semibold">{checkoutPlan}</span>: {PLAN_CURRENCY} ${PLAN_PRICES_CENTS[checkoutPlan] / 100}/month,
+                    charged today. (The free trial is for first-time subscribers.)
+                  </>
+                )
               }
-              submitLabel={`Start ${TRIAL_DAYS}-day free trial`}
+              submitLabel={status.trialEligible ? `Start ${TRIAL_DAYS}-day free trial` : "Subscribe"}
               busyLabel="Starting subscription…"
               onToken={(token) => post("/api/billing/subscribe", { plan: checkoutPlan, sourceId: token })}
               onDone={subscribed}
@@ -360,8 +368,8 @@ export default function BillingPage() {
         <div className="space-y-4 p-6">
           <h3 className="font-display text-base font-semibold text-ink-primary">Cancel your subscription?</h3>
           <p className="text-sm text-ink-secondary">
-            Square stops billing at the end of the current billing period, and AI features stay available until then. You can subscribe
-            again at any time.
+            Billing stops and you won&apos;t be charged again. AI features stay available until the end of the current billing period, or
+            until your free trial ends if you&apos;re still in it. You can subscribe again at any time (without a new free trial).
           </p>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setConfirmCancel(false)} disabled={busy}>

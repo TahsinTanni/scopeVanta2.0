@@ -26,9 +26,16 @@ export const GET = withErrors(async () => {
     }
   }
 
+  // Cancelled during the trial: access runs to the trial's end (see
+  // requireEntitlement), which is later than Square's own cancel date.
+  const inTrial = Boolean(sub?.trialEndsAt && sub.trialEndsAt.getTime() > Date.now());
+  if (live?.cancelsOn && inTrial && sub?.trialEndsAt) live = { ...live, cancelsOn: sub.trialEndsAt.toISOString().slice(0, 10) };
+
   return json({
     isOwner,
     live,
+    // Only a workspace that has never subscribed gets the free trial.
+    trialEligible: !(sub?.squareSubscriptionId || sub?.trialStartedAt),
     billing: state,
     plan: sub?.plan || "",
     subscriptionId: sub?.squareSubscriptionId ? `${sub.squareSubscriptionId.slice(0, 6)}…${sub.squareSubscriptionId.slice(-4)}` : "",

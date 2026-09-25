@@ -46,9 +46,12 @@ export const POST = withErrors(async (req: Request) => {
   const releaseClaim = () =>
     prisma.billingSubscription.update({ where: { workspaceId: ctx.workspaceId }, data: { status: previousStatus } });
 
+  // A workspace that has had a subscription before doesn't get another trial.
+  const returning = Boolean(sub?.squareSubscriptionId || sub?.trialStartedAt);
+
   let subscription;
   try {
-    subscription = await subscribeWorkspace(ctx.workspaceId, ctx.email, plan, sourceId);
+    subscription = await subscribeWorkspace(ctx.workspaceId, ctx.email, plan, sourceId, returning);
   } catch (e) {
     await releaseClaim();
     if (e instanceof SquareApiError && e.codes.some((c) => CARD_ERRORS.has(c))) {
@@ -59,14 +62,16 @@ export const POST = withErrors(async (req: Request) => {
   }
 
   const status = String(subscription.status || "").toUpperCase();
-  const trialStart = sub?.trialStartedAt || (subscription.start_date ? new Date(`${subscription.start_date}T00:00:00.000Z`) : new Date());
+  // Trial dates describe this subscription: a returning subscriber's "trial"
+  // starts and ends on day one.
+  const trialStart = subscription.start_date ? new Date(`${subscription.start_date}T00:00:00.000Z`) : new Date();
   const data = {
     plan,
     squareSubscriptionId: subscription.id,
     status: status === "ACTIVE" ? "verified_active" : `square_${status.toLowerCase() || "pending"}`,
     checkoutStartedAt: new Date(),
     trialStartedAt: trialStart,
-    trialEndsAt: sub?.trialEndsAt || trialEndFrom(trialStart),
+    trialEndsAt: returning ? trialStart : trialEndFrom(trialStart),
     verifiedAt: new Date(),
     chargedThroughDate: subscription.charged_through_date ? new Date(subscription.charged_through_date) : null,
     billingAction: "",

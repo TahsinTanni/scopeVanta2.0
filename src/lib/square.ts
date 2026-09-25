@@ -51,61 +51,96 @@ export async function square(path: string, init: RequestInit = {}): Promise<Reco
   return data;
 }
 
-export async function billingConfig() {
-  const existing = await prisma.squareBillingConfig.findFirst();
-  if (existing) return existing as unknown as { locationId: string; planId: string; variations: Record<string, string> };
+type PlanKey = "Freelancer" | "Pro" | "Agency";
+const PLAN_KEYS: PlanKey[] = ["Freelancer", "Pro", "Agency"];
+export type BillingConfig = { locationId: string; planId: string; variations: Record<string, string> };
 
-  const locations = await square("/v2/locations");
-  const location = ((locations.locations as Array<{ id: string; status: string }> | undefined) || []).find(
-    (x) => x.status === "ACTIVE",
-  );
-  if (!location) throw new Error("No active Square location");
+/**
+ * Catalog key of a plan's variation. `Pro` starts with the TRIAL_DAYS free
+ * phase; `Pro:returning` has no trial and is used for workspaces that have
+ * subscribed before, so cancelling and resubscribing can't repeat the trial.
+ */
+export const variationKey = (plan: PlanKey, returning: boolean) => (returning ? `${plan}:returning` : plan);
 
-  const key = crypto.randomUUID();
-  const plan = await square("/v2/catalog/object", {
+/** Plan name for a Square plan_variation_id, whichever variation (trial or returning) it is. */
+export function planForVariation(cfg: BillingConfig, variationId: unknown): PlanKey | undefined {
+  const key = Object.entries(cfg.variations).find(([, id]) => id === String(variationId || ""))?.[0];
+  return key ? (key.split(":")[0] as PlanKey) : undefined;
+}
+
+async function createPlanVariation(planId: string, plan: PlanKey, returning: boolean): Promise<string> {
+  const slug = `${plan.toLowerCase()}${returning ? "-returning" : ""}`;
+  const paid = { cadence: "MONTHLY", pricing: { type: "STATIC", price: { amount: PLAN_PRICES_CENTS[plan], currency: PLAN_CURRENCY } } };
+  const phases = returning
+    ? [{ ...paid, ordinal: 0 }]
+    : [
+        { cadence: "DAILY", ordinal: 0, periods: TRIAL_DAYS, pricing: { type: "STATIC", price: { amount: 0, currency: PLAN_CURRENCY } } },
+        { ...paid, ordinal: 1 },
+      ];
+  const v = await square("/v2/catalog/object", {
     method: "POST",
     body: JSON.stringify({
-      idempotency_key: `scopevanta-plan-${key}`,
+      idempotency_key: `scopevanta-${slug}-${crypto.randomUUID()}`,
       object: {
-        type: "SUBSCRIPTION_PLAN",
-        id: "#scopevanta",
+        type: "SUBSCRIPTION_PLAN_VARIATION",
+        id: `#scopevanta-${slug}`,
         present_at_all_locations: true,
-        subscription_plan_data: { name: "ScopeVanta SaaS Plans", all_items: true },
+        subscription_plan_variation_data: { name: `ScopeVanta ${plan}${returning ? " (returning)" : ""}`, subscription_plan_id: planId, phases },
       },
     }),
   });
-  const planId = String((plan.catalog_object as { id?: string })?.id || "");
-  if (!planId) throw new Error("Square plan creation failed");
+  const id = String((v.catalog_object as { id?: string })?.id || "");
+  if (!id) throw new Error(`Square ${slug} variation creation failed`);
+  return id;
+}
 
-  const variations: Record<string, string> = {};
-  for (const name of ["Freelancer", "Pro", "Agency"] as const) {
-    const v = await square("/v2/catalog/object", {
+/**
+ * The Square catalog objects billing uses, created on first use and stored in
+ * square_billing_config. Variations added later (e.g. the returning-customer
+ * ones) are created and saved the first time they're missing.
+ */
+export async function billingConfig(): Promise<BillingConfig> {
+  let cfg = (await prisma.squareBillingConfig.findFirst()) as unknown as (BillingConfig & { id: string }) | null;
+
+  if (!cfg) {
+    const locations = await square("/v2/locations");
+    const location = ((locations.locations as Array<{ id: string; status: string }> | undefined) || []).find(
+      (x) => x.status === "ACTIVE",
+    );
+    if (!location) throw new Error("No active Square location");
+
+    const plan = await square("/v2/catalog/object", {
       method: "POST",
       body: JSON.stringify({
-        idempotency_key: `scopevanta-${name.toLowerCase()}-${key}`,
+        idempotency_key: `scopevanta-plan-${crypto.randomUUID()}`,
         object: {
-          type: "SUBSCRIPTION_PLAN_VARIATION",
-          id: `#scopevanta-${name.toLowerCase()}`,
+          type: "SUBSCRIPTION_PLAN",
+          id: "#scopevanta",
           present_at_all_locations: true,
-          subscription_plan_variation_data: {
-            name: `ScopeVanta ${name}`,
-            subscription_plan_id: planId,
-            phases: [
-              { cadence: "DAILY", ordinal: 0, periods: TRIAL_DAYS, pricing: { type: "STATIC", price: { amount: 0, currency: PLAN_CURRENCY } } },
-              { cadence: "MONTHLY", ordinal: 1, pricing: { type: "STATIC", price: { amount: PLAN_PRICES_CENTS[name], currency: PLAN_CURRENCY } } },
-            ],
-          },
+          subscription_plan_data: { name: "ScopeVanta SaaS Plans", all_items: true },
         },
       }),
     });
-    const id = String((v.catalog_object as { id?: string })?.id || "");
-    if (!id) throw new Error(`Square ${name} variation creation failed`);
-    variations[name] = id;
+    const planId = String((plan.catalog_object as { id?: string })?.id || "");
+    if (!planId) throw new Error("Square plan creation failed");
+
+    const variations: Record<string, string> = {};
+    for (const name of PLAN_KEYS) variations[name] = await createPlanVariation(planId, name, false);
+    cfg = (await prisma.squareBillingConfig.create({
+      data: { locationId: location.id, planId, variations },
+    })) as unknown as BillingConfig & { id: string };
   }
 
-  return prisma.squareBillingConfig.create({
-    data: { locationId: location.id, planId, variations },
-  }) as unknown as { locationId: string; planId: string; variations: Record<string, string> };
+  const missing = PLAN_KEYS.filter((name) => !cfg!.variations[variationKey(name, true)]);
+  if (missing.length) {
+    const variations = { ...cfg.variations };
+    for (const name of missing) variations[variationKey(name, true)] = await createPlanVariation(cfg.planId, name, true);
+    cfg = (await prisma.squareBillingConfig.update({ where: { id: cfg.id }, data: { variations } })) as unknown as BillingConfig & {
+      id: string;
+    };
+  }
+
+  return { locationId: cfg.locationId, planId: cfg.planId, variations: cfg.variations };
 }
 
 /**
@@ -233,17 +268,18 @@ export async function liveSubscriptionDetails(
  * Subscribes the workspace's own Square customer (never a customer Square
  * matched by phone/email, which is what hosted payment links do) to `plan`:
  * saves the card from a Web Payments SDK token on that customer, then creates
- * the subscription charging it. The plan variation's first phase is the
- * TRIAL_DAYS $0 trial, so nothing is charged today.
+ * the subscription charging it. A first-time subscriber's variation starts
+ * with the TRIAL_DAYS $0 trial; a `returning` one is charged from day one.
  */
 export async function subscribeWorkspace(
   workspaceId: string,
   buyerEmail: string,
-  plan: "Freelancer" | "Pro" | "Agency",
+  plan: PlanKey,
   cardToken: string,
+  returning: boolean,
 ): Promise<SquareSubscription> {
   const cfg = await billingConfig();
-  const variationId = cfg.variations[plan];
+  const variationId = cfg.variations[variationKey(plan, returning)];
   if (!variationId) throw new Error("Unknown plan");
   const customerId = await ensureSquareCustomer(workspaceId, buyerEmail);
   const cardId = await saveCardOnFile(customerId, cardToken);
@@ -275,7 +311,7 @@ export async function verifyEntitlement(workspaceId: string) {
       | { id: string; status: string; plan_variation_id?: string; start_date?: string; charged_through_date?: string }
       | undefined;
     if (subscription) {
-      const planName = Object.entries(cfg.variations).find(([, id]) => id === subscription.plan_variation_id)?.[0];
+      const planName = planForVariation(cfg, subscription.plan_variation_id);
       return { ...subscription, plan: planName || sub.plan };
     }
   }
@@ -295,7 +331,7 @@ export async function verifyEntitlement(workspaceId: string) {
     .filter((s) => Object.values(cfg.variations).includes(String(s.plan_variation_id || "")))
     .sort((a, b) => String(b.start_date || "").localeCompare(String(a.start_date || "")))[0];
   if (!matched) return null;
-  const planName = Object.entries(cfg.variations).find(([, id]) => id === matched.plan_variation_id)?.[0];
+  const planName = planForVariation(cfg, matched.plan_variation_id);
   return { ...matched, plan: planName || sub.plan };
 }
 
