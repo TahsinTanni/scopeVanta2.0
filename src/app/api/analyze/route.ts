@@ -6,6 +6,9 @@ import { rankKnowledge, type KnowledgeRecordContent } from "@/lib/knowledge";
 import { PLAN_LIMITS } from "@/lib/square";
 import { COMP_PLAN_LIMIT, requireEntitlement } from "@/lib/billing";
 
+// AI calls can take well over a minute; don't let the platform default cut them off.
+export const maxDuration = 300;
+
 // POST /api/analyze — legacy/backend/index.ts:2130-2493. The AI system/user
 // prompt text is preserved verbatim; only the plumbing (workspace-scoped
 // Prisma instead of userId-keyed AppDeploy tables, BillingSubscription

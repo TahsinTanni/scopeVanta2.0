@@ -1,6 +1,8 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/prisma";
 import { assertFeatureEnabled } from "@/lib/flags";
+import { safeFetchText } from "@/lib/safe-fetch";
+import { HttpError } from "@/lib/http";
 
 // Replaces AppDeploy's `ai.generate` / `ai.extract` / `ai.ocr` / `ai.scrape`
 // (legacy/backend/index.ts) with equivalent Anthropic API calls. Every
@@ -67,9 +69,40 @@ async function recordUsage(track: AiTrack, startedAt: number, usage: Anthropic.M
   }
 }
 
-/** Runs one Anthropic call behind the "ai" feature switch and logs its token usage. */
+// Abuse/cost ceilings, counted from ai_usage_events (so no extra infra).
+// Generous for real use; they exist so one workspace, or one free signup
+// hammering support, can't run up an unbounded Anthropic bill.
+const AI_DAILY_CALL_LIMIT = Number(process.env.AI_DAILY_CALL_LIMIT) || 300;
+const AI_SUPPORT_HOURLY_LIMIT = Number(process.env.AI_SUPPORT_HOURLY_LIMIT) || 30;
+
+/**
+ * Throws 429 once a workspace has made AI_DAILY_CALL_LIMIT calls in the last
+ * 24 hours, or a user has sent AI_SUPPORT_HOURLY_LIMIT support messages in the
+ * last hour. Routes call it before their AI work so the owner sees this
+ * message (their catch blocks would otherwise turn it into a generic error);
+ * trackedCall re-checks every call as a backstop.
+ */
+export async function assertAiQuota(track: { workspaceId: string; userId?: string | null; feature?: string }) {
+  const lastDay = await prisma.aiUsageEvent.count({
+    where: { workspaceId: track.workspaceId, createdAt: { gte: new Date(Date.now() - 86_400_000) } },
+  });
+  if (lastDay >= AI_DAILY_CALL_LIMIT) {
+    throw new HttpError("This workspace has reached its daily AI limit. It frees up gradually over the next 24 hours — contact support if you need more.", 429);
+  }
+  if (track.feature === "support" && track.userId) {
+    const lastHour = await prisma.aiUsageEvent.count({
+      where: { workspaceId: track.workspaceId, userId: track.userId, feature: "support", createdAt: { gte: new Date(Date.now() - 3_600_000) } },
+    });
+    if (lastHour >= AI_SUPPORT_HOURLY_LIMIT) {
+      throw new HttpError("You've sent a lot of support messages in the last hour. Please wait a little, or email support.", 429);
+    }
+  }
+}
+
+/** Runs one Anthropic call behind the "ai" feature switch and usage limits, and logs its token usage. */
 async function trackedCall(track: AiTrack, call: () => Promise<Anthropic.Messages.Message>) {
   await assertFeatureEnabled("ai", track.workspaceId);
+  await assertAiQuota(track);
   const startedAt = Date.now();
   try {
     const response = await call();
@@ -196,15 +229,17 @@ export async function aiExtract<T>(args: ExtractArgs): Promise<{ data: T }> {
   }, args.maxRetries ?? 0);
 }
 
-/** Equivalent of legacy `ai.scrape` — plain HTTP fetch + tag-stripped text, no model call. */
+/**
+ * Equivalent of legacy `ai.scrape` — HTTP fetch + tag-stripped text, no model
+ * call. Goes through safeFetchText because the URL is customer-supplied:
+ * public addresses only, capped size and redirects (see lib/safe-fetch.ts).
+ */
 export async function aiScrape(args: { url: string }): Promise<{ status: number; text: string }> {
-  const response = await fetch(args.url, {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; ScopeVantaBot/1.0)" },
-    signal: AbortSignal.timeout(10_000),
+  const { status, text: html } = await safeFetchText(args.url, {
+    userAgent: "Mozilla/5.0 (compatible; ScopeVantaBot/1.0)",
+    timeoutMs: 10_000,
   });
-  const status = response.status;
   if (status >= 400) return { status, text: "" };
-  const html = await response.text();
   const text = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")

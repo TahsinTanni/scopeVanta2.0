@@ -94,6 +94,15 @@ export async function requireWorkspaceAuth(): Promise<WorkspaceContext> {
         where: { workspaceId_userId: { workspaceId: orgId, userId } },
       });
     }
+  } else if (member.role !== "OWNER") {
+    // Promotions/demotions happen in Clerk's organization screens, so keep
+    // ADMIN/MEMBER in step with the session's current Clerk role — otherwise a
+    // demoted admin would keep admin powers here. OWNER is an app-level role
+    // Clerk doesn't know about, so it's never overwritten.
+    const clerkRole = mapClerkRole(orgRole, false);
+    if (clerkRole !== member.role) {
+      member = await prisma.workspaceMember.update({ where: { id: member.id }, data: { role: clerkRole } });
+    }
   }
 
   return { userId, email: user.email, workspaceId: orgId, role: member.role };

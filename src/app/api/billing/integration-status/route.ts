@@ -1,4 +1,4 @@
-import { requireWorkspaceAuth } from "@/lib/auth";
+import { requireWorkspaceAuth, requireRole } from "@/lib/auth";
 import { json, withErrors } from "@/lib/http";
 import { SQUARE_API_BASE, SQUARE_ENVIRONMENT, SQUARE_VERSION } from "@/lib/square";
 
@@ -6,7 +6,8 @@ import { SQUARE_API_BASE, SQUARE_ENVIRONMENT, SQUARE_VERSION } from "@/lib/squar
 // secrets.listSecretNames()/readSecret() replaced with process.env
 // (Vercel environment variables — see CLAUDE.md migration notes).
 export const GET = withErrors(async () => {
-  await requireWorkspaceAuth();
+  // Owner-only: reveals the Square account's locations.
+  requireRole(await requireWorkspaceAuth(), ["OWNER"]);
   const webhookConfigured = Boolean(process.env.SQUARE_WEBHOOK_SIGNATURE_KEY);
   const token = process.env.SQUARE_ACCESS_TOKEN;
   if (!token) {

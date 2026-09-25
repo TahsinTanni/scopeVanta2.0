@@ -1,7 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { requireWorkspaceAuth } from "@/lib/auth";
 import { json, error, withErrors } from "@/lib/http";
-import { aiGenerate } from "@/lib/ai";
+import { aiGenerate, assertAiQuota } from "@/lib/ai";
+
+// AI calls can take well over a minute; don't let the platform default cut them off.
+export const maxDuration = 300;
 
 // POST /api/support — legacy/backend/index.ts:4652-4686.
 type LoggedMessage = { role: "user" | "assistant"; text: string; at: string };
@@ -11,6 +14,8 @@ export const POST = withErrors(async (req: Request) => {
   const b = (await req.json().catch(() => ({}))) as { message?: string; history?: Array<{ role: string; text: string }>; conversationId?: string };
   const message = (b.message || "").trim();
   if (!message) return error("Message is required.", 400);
+  // Support is open without a subscription, so it's rate-limited per user.
+  await assertAiQuota({ workspaceId: ctx.workspaceId, userId: ctx.userId, feature: "support" });
 
   const sub = await prisma.billingSubscription.findUnique({ where: { workspaceId: ctx.workspaceId } });
 

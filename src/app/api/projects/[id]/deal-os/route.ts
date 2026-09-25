@@ -5,6 +5,9 @@ import { requireEntitlement } from "@/lib/billing";
 import { aiGenerate, parseModelJson } from "@/lib/ai";
 import { projectData, formatConfirmedFacts } from "@/lib/project-data";
 
+// AI calls can take well over a minute; don't let the platform default cut them off.
+export const maxDuration = 300;
+
 // POST /api/projects/:id/deal-os — legacy/backend/index.ts:3836-3941.
 const ALLOWED_ACTIONS = new Set([
   "discovery", "compile", "margin", "choices", "negotiation", "change", "autopsy",

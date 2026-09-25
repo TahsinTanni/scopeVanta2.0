@@ -6,6 +6,9 @@ import { storageRead } from "@/lib/storage";
 import { aiGenerate, aiOcr } from "@/lib/ai";
 import { structureKnowledge, knowledgeCategories, type KnowledgeRecordContent } from "@/lib/knowledge";
 
+// AI calls can take well over a minute; don't let the platform default cut them off.
+export const maxDuration = 300;
+
 // POST /api/files/:id/reprocess — legacy/backend/index.ts:1318-1511.
 // Preserves the "commit new facts before deleting the old ones" ordering so
 // a failure partway through leaves existing knowledge untouched.

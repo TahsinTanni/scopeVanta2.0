@@ -7,6 +7,9 @@ import { storageWrite, storageDelete } from "@/lib/storage";
 import { aiGenerate, aiOcr } from "@/lib/ai";
 import { structureKnowledge, knowledgeCategories } from "@/lib/knowledge";
 
+// AI calls can take well over a minute; don't let the platform default cut them off.
+export const maxDuration = 300;
+
 // POST /api/upload — legacy/backend/index.ts:1034-1270. File-extraction
 // logic (txt/md decode, PDF/Word via AI transcription, image OCR, knowledge
 // structuring) preserved verbatim; storage.write/url replaced with Vercel
@@ -40,7 +43,10 @@ export const POST = withErrors(async (req: Request) => {
   const safe = b.name.replace(/[^a-zA-Z0-9._-]/g, "_").slice(-100);
   const path = `workspaces/${ctx.workspaceId}/${b.kind}/${Date.now()}-${safe}`;
   const contentType = b.type || "application/octet-stream";
-  const url = await storageWrite(path, b.content, contentType);
+  // Logos are shown on buyer-facing pages, so they're public; every other
+  // upload is a knowledge document and goes to private storage.
+  const isLogo = b.kind === "logo" || b.kind === "client_logo";
+  const url = await storageWrite(path, b.content, contentType, isLogo ? "public" : "private");
 
   let fileId: string | undefined;
   let status: "ready" | "stored" | "failed" = "stored";
@@ -213,7 +219,9 @@ export const POST = withErrors(async (req: Request) => {
   }
 
   return json({
-    url,
+    // Only logos need their URL in the browser; a document's storage URL
+    // never leaves the server.
+    url: isLogo ? url : undefined,
     name: safe,
     id: fileId,
     status,

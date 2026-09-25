@@ -63,7 +63,7 @@ All routes live under `src/app/api/`, one Next.js route file per legacy
 endpoint, each with a comment citing the exact legacy line range it was
 translated from. Grouped:
 
-**Health / billing**: `_healthcheck`, `square/webhook`, `billing/integration-status`, `billing/status`, `billing/checkout-started`, `billing/sync`
+**Health / billing**: `healthcheck`, `square/webhook`, `billing/integration-status`, `billing/status`, `billing/checkout-config`, `billing/subscribe`, `billing/update-card`, `billing/cancel`, `billing/sync`
 
 **Profile** (split per CLAUDE.md): `workspace/profile` (company, Owner/Admin write), `user/settings` (personal, net new)
 

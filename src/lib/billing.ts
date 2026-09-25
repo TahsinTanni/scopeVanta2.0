@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { HttpError } from "@/lib/http";
 import { PLAN_LIMITS, verifyEntitlement, billingDateAdvanced, hasDevEntitlementBypass } from "@/lib/square";
 import { TRIAL_DAYS, trialEndFrom } from "@/lib/plans";
+import { assertAiQuota } from "@/lib/ai";
 
 // Square error codes that mean "this card was refused", shown to the owner as
 // a card problem rather than an outage.
@@ -101,6 +102,9 @@ export async function requireEntitlement(workspaceId: string, context: string): 
   let sub = await prisma.billingSubscription.findUnique({ where: { workspaceId } });
   // Staff-granted free plans (admin panel) skip Square entitlement entirely.
   const comp = sub?.compPlan === true;
+  // Every caller is about to make AI calls, so the daily AI ceiling is checked
+  // here (before the route's own error handling can mask it) — free plans too.
+  if (!devBypass) await assertAiQuota({ workspaceId });
   if (devBypass || comp) return { sub, devBypass, comp };
   if (!sub?.checkoutStartedAt) throw new HttpError("Start your Square subscription checkout to activate the trial.", 402);
 

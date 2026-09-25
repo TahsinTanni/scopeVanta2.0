@@ -7,7 +7,7 @@ const isPublicRoute = createRouteMatcher([
   "/opengraph-image(.*)",
   "/sign-in(.*)",
   "/sign-up(.*)",
-  "/api/_healthcheck",
+  "/api/healthcheck",
   "/api/square/webhook",
   // Buyer-facing pages, real URLs replacing legacy's #share=/#discovery=
   // hash-fragment routing (see /share/[token] and /discovery/[token]).

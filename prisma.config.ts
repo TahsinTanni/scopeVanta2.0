@@ -8,7 +8,11 @@ export default defineConfig({
   migrations: {
     path: "prisma/migrations",
   },
+  // Prisma CLI (migrate, db pull, studio) connects here. It must NOT be the
+  // transaction pooler (DATABASE_URL, Supabase port 6543): migrations hang
+  // on it. Prefer the session pooler / direct connection. The app's runtime
+  // client uses DATABASE_URL separately (src/lib/prisma.ts).
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url: process.env["MIGRATE_DATABASE_URL"] || process.env["DIRECT_DATABASE_URL"] || process.env["DATABASE_URL"],
   },
 });

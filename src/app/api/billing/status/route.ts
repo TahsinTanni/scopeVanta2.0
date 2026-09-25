@@ -38,15 +38,21 @@ export const GET = withErrors(async () => {
     trialEligible: !(sub?.squareSubscriptionId || sub?.trialStartedAt),
     billing: state,
     plan: sub?.plan || "",
-    subscriptionId: sub?.squareSubscriptionId ? `${sub.squareSubscriptionId.slice(0, 6)}…${sub.squareSubscriptionId.slice(-4)}` : "",
-    verifiedAt: sub?.verifiedAt?.toISOString() || "",
-    checkoutStartedAt: sub?.checkoutStartedAt?.toISOString() || "",
-    trialStartedAt: sub?.trialStartedAt?.toISOString() || "",
-    trialEndsAt: sub?.trialEndsAt?.toISOString() || state.trialEndsAt || "",
-    chargedThroughDate: sub?.chargedThroughDate?.toISOString() || "",
     requiresAction: !devBypass && !sub?.compPlan && sub?.status !== "verified_active",
     action: devBypass || sub?.compPlan ? "" : sub?.billingAction || "",
-    lastBillingEvent: sub?.lastBillingEvent || "",
     lifecycle: sub?.compPlan ? "complimentary" : sub?.status || "trial_setup",
+    // Subscription details are Owner-only; other members just see the plan
+    // and whether anything needs doing (so they know why AI is paused).
+    ...(isOwner
+      ? {
+          subscriptionId: sub?.squareSubscriptionId ? `${sub.squareSubscriptionId.slice(0, 6)}…${sub.squareSubscriptionId.slice(-4)}` : "",
+          verifiedAt: sub?.verifiedAt?.toISOString() || "",
+          checkoutStartedAt: sub?.checkoutStartedAt?.toISOString() || "",
+          trialStartedAt: sub?.trialStartedAt?.toISOString() || "",
+          trialEndsAt: sub?.trialEndsAt?.toISOString() || state.trialEndsAt || "",
+          chargedThroughDate: sub?.chargedThroughDate?.toISOString() || "",
+          lastBillingEvent: sub?.lastBillingEvent || "",
+        }
+      : { subscriptionId: "", verifiedAt: "", checkoutStartedAt: "", trialStartedAt: "", trialEndsAt: "", chargedThroughDate: "", lastBillingEvent: "" }),
   });
 });

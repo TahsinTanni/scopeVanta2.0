@@ -5,6 +5,9 @@ import { requireEntitlement } from "@/lib/billing";
 import { aiGenerate, parseModelJson } from "@/lib/ai";
 import { projectData } from "@/lib/project-data";
 
+// AI calls can take well over a minute; don't let the platform default cut them off.
+export const maxDuration = 300;
+
 // POST /api/projects/:id/refine — legacy/backend/index.ts:2494-2683.
 type ProposalOptions = { mode?: string; sections?: string[]; includeSellerLogo?: boolean; includeClientLogo?: boolean; includeVisuals?: boolean };
 type Body = { answers?: string[]; proposalOptions?: ProposalOptions };

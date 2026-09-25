@@ -5,6 +5,9 @@ import { requireEntitlement } from "@/lib/billing";
 import { aiGenerate, parseModelJson } from "@/lib/ai";
 import { projectData, formatConfirmedFacts } from "@/lib/project-data";
 
+// AI calls can take well over a minute; don't let the platform default cut them off.
+export const maxDuration = 300;
+
 // POST /api/projects/:id/commercial-lab — legacy/backend/index.ts:3046-3234.
 // Post-processing arithmetic (estimatedCost, minimumSafePrice, margins)
 // preserved exactly.
