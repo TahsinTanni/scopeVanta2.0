@@ -8,6 +8,10 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/healthcheck",
+  // Legal pages, linked from the landing page and checkout.
+  "/terms",
+  "/privacy",
+  "/refunds",
   "/api/square/webhook",
   // Buyer-facing pages, real URLs replacing legacy's #share=/#discovery=
   // hash-fragment routing (see /share/[token] and /discovery/[token]).

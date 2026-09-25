@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Card, PageHeader, Button, Input, Textarea, Label, Select } from "@/components/ui";
+import { Card, PageHeader, Button, Input, Textarea, Label, Select, IconButton } from "@/components/ui";
 import { trackEvent } from "@/lib/track";
 import { AIProgress } from "@/components/AIProgress";
 
@@ -56,6 +56,9 @@ export default function NewProposalPage() {
             setError(body.error || "Reference file upload failed.");
             return;
           }
+          // It's in the knowledge base now; clear it so retrying Generate
+          // (e.g. after a billing error) doesn't upload a duplicate.
+          setReferenceFile(null);
         } finally {
           setUploadingReference(false);
         }
@@ -193,16 +196,28 @@ export default function NewProposalPage() {
           </div>
           <div>
             <Label>Reference file (optional)</Label>
-            <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
-              <span className="material-symbols-outlined text-[18px]">attach_file</span>
-              <span>{referenceFile ? referenceFile.name : "Attach reference file"}</span>
-              <input
-                type="file"
-                className="hidden"
-                accept=".pdf,.txt,.md,.doc,.docx,image/*"
-                onChange={(e) => setReferenceFile(e.target.files?.[0] || null)}
-              />
-            </label>
+            {referenceFile ? (
+              // Not uploaded until Generate, so removing just clears the selection.
+              <span className="inline-flex items-center gap-1 rounded-[4px] border border-border-hairline px-3 py-1.5 text-sm text-ink-primary">
+                <span className="material-symbols-outlined text-[18px]">description</span>
+                <span className="max-w-[240px] truncate">{referenceFile.name}</span>
+                <IconButton icon="close" label="Remove file" onClick={() => setReferenceFile(null)} disabled={busy} />
+              </span>
+            ) : (
+              <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
+                <span className="material-symbols-outlined text-[18px]">attach_file</span>
+                <span>Attach reference file</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.txt,.md,.doc,.docx,image/*"
+                  onChange={(e) => {
+                    setReferenceFile(e.target.files?.[0] || null);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            )}
           </div>
         </div>
         {error && (

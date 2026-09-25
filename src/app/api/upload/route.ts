@@ -234,3 +234,35 @@ export const POST = withErrors(async (req: Request) => {
     documentType: intelligence?.documentType || "",
   });
 });
+
+// DELETE /api/upload — removes a logo. Body: { kind: "logo" } (Owner/Admin,
+// same as uploading one) or { kind: "client_logo", clientId }. Knowledge
+// documents are removed with DELETE /api/files/:id instead. Logos are always
+// read live from the profile/client row (no share page keeps a copy of the
+// URL), so the blob is deleted too.
+export const DELETE = withErrors(async (req: Request) => {
+  const ctx = await requireWorkspaceAuth();
+  const b = (await req.json().catch(() => ({}))) as { kind?: string; clientId?: string };
+
+  if (b.kind === "logo") {
+    requireRole(ctx, ["OWNER", "ADMIN"]);
+    const profile = await prisma.companyProfile.findUnique({ where: { workspaceId: ctx.workspaceId } });
+    if (profile?.logoPath) {
+      await prisma.companyProfile.update({ where: { workspaceId: ctx.workspaceId }, data: { logoPath: null } });
+      await storageDelete(profile.logoPath);
+    }
+    return json({ removed: true });
+  }
+
+  if (b.kind === "client_logo") {
+    const client = await prisma.client.findFirst({ where: { id: String(b.clientId || ""), workspaceId: ctx.workspaceId } });
+    if (!client) return error("Saved client not found.", 404);
+    if (client.logoUrl) {
+      await prisma.client.update({ where: { id: client.id }, data: { logoUrl: null } });
+      await storageDelete(client.logoUrl);
+    }
+    return json({ removed: true });
+  }
+
+  return error("Choose which logo to remove.", 400);
+});

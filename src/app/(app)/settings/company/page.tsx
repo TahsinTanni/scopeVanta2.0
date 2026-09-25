@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, PageHeader, Button, Input, Textarea, Label, Select } from "@/components/ui";
+import { Card, PageHeader, Button, Input, Textarea, Label, Select, IconButton } from "@/components/ui";
 import { CURRENCIES } from "@/lib/currency";
 
 export default function CompanyProfilePage() {
@@ -44,6 +44,17 @@ export default function CompanyProfilePage() {
     }
   }
 
+  async function removeLogo() {
+    setError("");
+    const res = await fetch("/api/upload", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "logo" }) });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error || "Couldn't remove the logo. Please try again.");
+      return;
+    }
+    setLogoUrl("");
+  }
+
   async function save() {
     setError("");
     setSaved(false);
@@ -76,7 +87,12 @@ export default function CompanyProfilePage() {
         <div className="mt-4">
           <Label>Company logo</Label>
           <div className="flex items-center gap-3">
-            {logoUrl && <img src={logoUrl} alt="" className="h-10 w-10 rounded-full object-cover border border-border-hairline" />}
+            {logoUrl && (
+              <>
+                <img src={logoUrl} alt="" className="h-10 w-10 rounded-full object-cover border border-border-hairline" />
+                <IconButton icon="close" label="Remove logo" onClick={removeLogo} disabled={uploadingLogo} />
+              </>
+            )}
             <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
               <span className="material-symbols-outlined text-[18px]">
                 {uploadingLogo ? "progress_activity" : "upload_file"}
@@ -86,7 +102,11 @@ export default function CompanyProfilePage() {
                 type="file"
                 className="hidden"
                 accept="image/*"
-                onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = ""; // so picking the same file again still triggers
+                  if (file) uploadLogo(file);
+                }}
               />
             </label>
           </div>

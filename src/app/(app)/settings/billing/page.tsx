@@ -24,6 +24,17 @@ type BillingStatus = {
 
 const fmtDate = (d: string) => new Date(d.length === 10 ? `${d}T00:00:00` : d).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 
+/** Consent line shown where a subscription starts. */
+function LegalConsent() {
+  return (
+    <span className="mt-2 block text-xs text-ink-muted">
+      By subscribing you agree to the{" "}
+      <a href="/terms" target="_blank" className="underline">Terms of Service</a> and{" "}
+      <a href="/refunds" target="_blank" className="underline">Cancellation &amp; Refund Policy</a>.
+    </span>
+  );
+}
+
 /** POSTs JSON; resolves to the server's error message, or null on success. */
 async function post(url: string, body?: unknown): Promise<string | null> {
   const res = await fetch(url, {
@@ -277,12 +288,12 @@ export default function BillingPage() {
                 status.trialEligible ? (
                   <>
                     Subscribe to <span className="font-semibold">{checkoutPlan}</span>: the first {TRIAL_DAYS} days are free, then {PLAN_CURRENCY} $
-                    {PLAN_PRICES_CENTS[checkoutPlan] / 100}/month. Nothing is charged today.
+                    {PLAN_PRICES_CENTS[checkoutPlan] / 100}/month until you cancel. Nothing is charged today. <LegalConsent />
                   </>
                 ) : (
                   <>
                     Subscribe to <span className="font-semibold">{checkoutPlan}</span>: {PLAN_CURRENCY} ${PLAN_PRICES_CENTS[checkoutPlan] / 100}/month,
-                    charged today. (The free trial is for first-time subscribers.)
+                    charged today and monthly until you cancel. (The free trial is for first-time subscribers.) <LegalConsent />
                   </>
                 )
               }

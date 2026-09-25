@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Card, PageHeader, Button, Input, Textarea, Select, Label, Badge, EmptyState } from "@/components/ui";
+import { Card, PageHeader, Button, Input, Textarea, Select, Label, Badge, EmptyState, IconButton } from "@/components/ui";
 import { trackEvent } from "@/lib/track";
 
 type Client = {
@@ -108,6 +108,22 @@ export default function ClientsPage() {
     }
   }
 
+  async function removeLogo() {
+    if (!editingId) return;
+    setError("");
+    const res = await fetch("/api/upload", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "client_logo", clientId: editingId }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error || "Couldn't remove the logo. Please try again.");
+      return;
+    }
+    load();
+  }
+
   const filtered = clients.filter((c) => !search || c.name.toLowerCase().includes(search.toLowerCase()) || (c.company || "").toLowerCase().includes(search.toLowerCase()));
   const editingClient = editingId ? clients.find((c) => c.id === editingId) : undefined;
 
@@ -154,7 +170,10 @@ export default function ClientsPage() {
           {editingId && (
             <div className="mb-4 flex items-center gap-3">
               {editingClient?.logoUrl && (
-                <img src={editingClient.logoUrl} alt="" className="h-10 w-10 rounded-full object-cover border border-border-hairline" />
+                <>
+                  <img src={editingClient.logoUrl} alt="" className="h-10 w-10 rounded-full object-cover border border-border-hairline" />
+                  <IconButton icon="close" label="Remove logo" onClick={removeLogo} disabled={uploadingLogo} />
+                </>
               )}
               <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
                 <span className="material-symbols-outlined text-[18px]">
@@ -165,7 +184,11 @@ export default function ClientsPage() {
                   type="file"
                   className="hidden"
                   accept="image/*"
-                  onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = ""; // so picking the same file again still triggers
+                    if (file) uploadLogo(file);
+                  }}
                 />
               </label>
             </div>

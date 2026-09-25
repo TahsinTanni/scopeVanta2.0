@@ -944,6 +944,9 @@ export default function LandingPage() {
               <nav className="mt-4 flex flex-col items-start gap-3 text-sm text-ink-muted font-body" aria-label="Account navigation">
                 <Link href="/sign-in" className="hover:text-accent-hover transition-colors">Sign in</Link>
                 <Link href="/sign-up" className="hover:text-accent-hover transition-colors">Create an account</Link>
+                <Link href="/terms" className="hover:text-accent-hover transition-colors">Terms of Service</Link>
+                <Link href="/privacy" className="hover:text-accent-hover transition-colors">Privacy Policy</Link>
+                <Link href="/refunds" className="hover:text-accent-hover transition-colors">Cancellation &amp; Refunds</Link>
               </nav>
             </div>
           </div>

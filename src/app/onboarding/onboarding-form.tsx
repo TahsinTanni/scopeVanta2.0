@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Input, Textarea, Label, Card } from "@/components/ui";
+import { Button, Input, Textarea, Label, Card, IconButton } from "@/components/ui";
 import { TRIAL_DAYS } from "@/lib/plans";
 
 const PLANS = [
@@ -29,6 +29,8 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
   const [logoUrl, setLogoUrl] = useState("");
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [referenceUploadStatus, setReferenceUploadStatus] = useState<"idle" | "uploading" | "done" | "deferred" | "error">("idle");
+  // The uploaded reference document, so it can be removed (× button) and replaced.
+  const [reference, setReference] = useState<{ id: string; name: string } | null>(null);
 
   async function uploadLogo(file: File) {
     setUploadingLogo(true);
@@ -69,9 +71,34 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
       }
       // Saved, but AI processing waits for an active subscription.
       setReferenceUploadStatus(body.processingDeferred ? "deferred" : "done");
+      setReference(body.id ? { id: body.id, name: body.name || file.name } : null);
     } catch {
       setReferenceUploadStatus("error");
     }
+  }
+
+  async function removeReference() {
+    if (!reference) return;
+    setError("");
+    const res = await fetch(`/api/files/${reference.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error || "Couldn't remove the file. Please try again.");
+      return;
+    }
+    setReference(null);
+    setReferenceUploadStatus("idle");
+  }
+
+  async function removeLogo() {
+    setError("");
+    const res = await fetch("/api/upload", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "logo" }) });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error || "Couldn't remove the logo. Please try again.");
+      return;
+    }
+    setLogoUrl("");
   }
 
   async function submit() {
@@ -137,7 +164,12 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
           <div className="mt-4">
             <Label>Company logo (optional)</Label>
             <div className="flex items-center gap-3">
-              {logoUrl && <img src={logoUrl} alt="" className="h-10 w-10 rounded-full object-cover border border-border" />}
+              {logoUrl && (
+                <>
+                  <img src={logoUrl} alt="" className="h-10 w-10 rounded-full object-cover border border-border" />
+                  <IconButton icon="close" label="Remove logo" onClick={removeLogo} disabled={uploadingLogo} />
+                </>
+              )}
               <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
                 <span className="material-symbols-outlined text-[18px]">
                   {uploadingLogo ? "progress_activity" : "upload_file"}
@@ -147,7 +179,11 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
                   type="file"
                   className="hidden"
                   accept="image/*"
-                  onChange={(e) => e.target.files?.[0] && uploadLogo(e.target.files[0])}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = ""; // so picking the same file again still triggers
+                    if (file) uploadLogo(file);
+                  }}
                 />
               </label>
             </div>
@@ -157,18 +193,30 @@ export default function OnboardingForm({ initialProfile, isOwner }: { initialPro
         <div className="mt-4">
           <Label>Seed your knowledge base (optional)</Label>
           <div className="flex items-center gap-3">
-            <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
-              <span className="material-symbols-outlined text-[18px]">
-                {referenceUploadStatus === "uploading" ? "progress_activity" : "upload_file"}
+            {reference ? (
+              <span className="inline-flex items-center gap-1 rounded-[4px] border border-border px-3 py-1.5 text-sm text-foreground">
+                <span className="material-symbols-outlined text-[18px]">description</span>
+                <span className="max-w-[220px] truncate">{reference.name}</span>
+                <IconButton icon="close" label="Remove file" onClick={removeReference} />
               </span>
-              <span>{referenceUploadStatus === "uploading" ? "Uploading…" : "Attach reference file"}</span>
-              <input
-                type="file"
-                className="hidden"
-                accept=".pdf,.txt,.md,.doc,.docx,image/*"
-                onChange={(e) => e.target.files?.[0] && uploadReference(e.target.files[0])}
-              />
-            </label>
+            ) : (
+              <label className="inline-flex items-center gap-1.5 cursor-pointer rounded-[4px] bg-accent px-4 py-2 text-sm font-medium text-surface-0 hover:bg-accent-hover transition-colors">
+                <span className="material-symbols-outlined text-[18px]">
+                  {referenceUploadStatus === "uploading" ? "progress_activity" : "upload_file"}
+                </span>
+                <span>{referenceUploadStatus === "uploading" ? "Uploading…" : "Attach reference file"}</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.txt,.md,.doc,.docx,image/*"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) uploadReference(file);
+                  }}
+                />
+              </label>
+            )}
             {referenceUploadStatus === "done" && <span className="text-xs text-success">Added to knowledge base ✓</span>}
             {referenceUploadStatus === "deferred" && (
               <span className="text-xs text-foreground-subtle">Saved ✓ — reprocess it from Knowledge after checkout</span>
