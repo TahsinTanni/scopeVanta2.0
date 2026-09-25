@@ -57,7 +57,7 @@ export default function PrivacyPage() {
       <h2>4. How long we keep it</h2>
       <p>
         We keep workspace content while your account is active. When a workspace is deleted, we delete its content, including
-        uploaded files, within [30] days, except where we must keep records (for example, billing records) for legal or tax reasons.
+        uploaded files, within 30 days, except where we must keep records (for example, billing records) for legal or tax reasons.
         Backups are overwritten on a rolling basis.
       </p>
 

@@ -30,7 +30,7 @@ export default function RefundsPage() {
       <p>
         Subscriptions are billed monthly in {PLAN_CURRENCY}, in advance. We don&apos;t refund partial months or unused time after you
         cancel, except where the law requires it. If you were charged in error — for example, a duplicate charge, or a charge after
-        you cancelled — contact us within [30] days at [Contact email] and we&apos;ll refund it to the original card.
+        you cancelled — contact us within 30 days at [Contact email] and we&apos;ll refund it to the original card.
       </p>
 
       <h2>Failed payments</h2>
