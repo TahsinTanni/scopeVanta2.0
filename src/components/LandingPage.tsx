@@ -691,7 +691,7 @@ export default function LandingPage() {
               href="/sign-up"
               className="whitespace-nowrap rounded-full bg-accent px-4 py-2 text-xs font-semibold uppercase tracking-wider text-[#002116] hover:bg-accent-hover active:bg-accent-pressed transition-all shadow-[0_2px_12px_rgba(var(--accent-rgb),0.3)]"
             >
-              Start free
+              Register
             </Link>
           </div>
         </div>
@@ -701,7 +701,7 @@ export default function LandingPage() {
         {/* Hero Section */}
         <section className="pt-20 sm:pt-24 pb-20 px-6 max-w-5xl mx-auto text-center">
           <p className="sv-rise text-xs font-mono uppercase tracking-wider text-accent-hover" style={{ animationDelay: "0ms" }}>
-            For agencies, studios &amp; consultants who price client work
+            For agencies, studios &amp; consultants
           </p>
           <h1 className="mt-5 font-display text-4xl sm:text-6xl lg:text-7xl font-normal tracking-tight text-ink-primary leading-[1.1]">
             <span className="sv-rise block" style={{ animationDelay: "100ms" }}>
@@ -716,7 +716,7 @@ export default function LandingPage() {
             className="sv-rise mt-6 max-w-2xl mx-auto text-base sm:text-lg text-ink-muted leading-relaxed font-display"
             style={{ animationDelay: "340ms" }}
           >
-            Turn a messy client brief into a priced, risk-checked proposal your client can approve online — then keep every change request inside the margin you agreed.
+            Turn a messy client brief into a priced, risk-checked proposal your client can approve — then keep every change request inside the margin you agreed.
           </p>
 
           <div className="sv-rise mt-10 flex flex-col sm:flex-row items-center justify-center gap-3" style={{ animationDelay: "460ms" }}>
@@ -797,7 +797,7 @@ export default function LandingPage() {
             reduced={reduced}
             eyebrow="Pricing"
             title="Simple plans. Every feature included."
-            subtitle={`Pick a plan by how many proposals you send. One flat price per workspace, billed monthly in ${PLAN_CURRENCY} through Square. First ${TRIAL_DAYS} days free.`}
+            subtitle={`Pick a plan by how many proposals you send. One flat price per workspace, billed monthly. First ${TRIAL_DAYS} days free.`}
           />
 
           <Reveal reduced={reduced}>
