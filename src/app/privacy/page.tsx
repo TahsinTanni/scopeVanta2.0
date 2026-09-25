@@ -7,7 +7,7 @@ export default function PrivacyPage() {
   return (
     <LegalPage title="Privacy Policy">
       <p>
-        This policy explains how [Legal business name] (&quot;ScopeVanta&quot;, &quot;we&quot;) collects, uses and protects personal
+        This policy explains how Mir Taki Tazwar (&quot;ScopeVanta&quot;, &quot;we&quot;) collects, uses and protects personal
         information when you use ScopeVanta. We handle personal information in line with Canada&apos;s Personal Information
         Protection and Electronic Documents Act (PIPEDA) and applicable provincial privacy laws.
       </p>
@@ -51,7 +51,8 @@ export default function PrivacyPage() {
       </ul>
       <p>
         Some of these providers store or process information outside Canada, including in the United States, where it may be
-        accessible to authorities under local law. [Confirm the data regions you use.]
+        accessible to authorities under local law. Our database is hosted in Canada; hosting, sign-in and AI processing
+        providers may process information in the United States.
       </p>
 
       <h2>4. How long we keep it</h2>
@@ -71,7 +72,7 @@ export default function PrivacyPage() {
       <h2>6. Your choices and rights</h2>
       <p>
         You can access and update most of your information in the app. You can ask us to access, correct or delete your personal
-        information, or withdraw consent (which may mean you can no longer use the Service), by contacting [Contact email]. If
+        information, or withdraw consent (which may mean you can no longer use the Service), by contacting mirtaki123@gmail.com. If
         you&apos;re not satisfied with our response, you can contact the Office of the Privacy Commissioner of Canada.
       </p>
 
@@ -85,7 +86,7 @@ export default function PrivacyPage() {
       <p>We&apos;ll post updates here and notify you of significant changes.</p>
 
       <h2>9. Contact</h2>
-      <p>Privacy questions or requests: [Contact email], [Business address]. [Name or title of your privacy officer.]</p>
+      <p>Privacy questions or requests: mirtaki123@gmail.com, Toronto, Ontario, Canada. Our privacy officer is Mir Taki Tazwar.</p>
     </LegalPage>
   );
 }

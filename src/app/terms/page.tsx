@@ -9,8 +9,7 @@ export default function TermsPage() {
   return (
     <LegalPage title="Terms of Service">
       <p>
-        These Terms of Service (&quot;Terms&quot;) govern your use of ScopeVanta (the &quot;Service&quot;), provided by [Legal business
-        name], [Business address] (&quot;ScopeVanta&quot;, &quot;we&quot;, &quot;us&quot;). By creating an account or using the Service,
+        These Terms of Service (&quot;Terms&quot;) govern your use of ScopeVanta (the &quot;Service&quot;), provided by Mir Taki Tazwar, Toronto, Ontario, Canada (&quot;ScopeVanta&quot;, &quot;we&quot;, &quot;us&quot;). By creating an account or using the Service,
         you agree to these Terms on behalf of yourself and the business you represent. If you don&apos;t agree, don&apos;t use the
         Service.
       </p>
@@ -46,7 +45,7 @@ export default function TermsPage() {
           for what happens when you cancel.
         </li>
         <li>If a payment fails, AI features are paused until the overdue invoice is paid.</li>
-        <li>Prices exclude applicable taxes, which are added where required. [Confirm whether you collect GST/HST.]</li>
+        <li>Prices exclude applicable taxes, which are added where required.</li>
         <li>We may change prices with at least 30 days&apos; notice; changes apply from your next billing period.</li>
       </ul>
 
@@ -118,10 +117,10 @@ export default function TermsPage() {
       </p>
 
       <h2>13. Governing law</h2>
-      <p>These Terms are governed by the laws of [Province] and the federal laws of Canada that apply there.</p>
+      <p>These Terms are governed by the laws of the Province of Ontario and the federal laws of Canada that apply there.</p>
 
       <h2>14. Contact</h2>
-      <p>Questions about these Terms: [Contact email].</p>
+      <p>Questions about these Terms: mirtaki123@gmail.com.</p>
     </LegalPage>
   );
 }
